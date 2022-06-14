@@ -21,10 +21,18 @@
  */
 #pragma once
 
+#include <unistd.h>
+#include "iputils.hh"
+#include "dnsdist.hh"
+
 struct ConnectionInfo
 {
   ConnectionInfo(ClientState* cs_) :
     cs(cs_), fd(-1)
+  {
+  }
+  ConnectionInfo(ClientState* cs_, const ComboAddress remote_) :
+    remote(remote_), cs(cs_), fd(-1)
   {
   }
   ConnectionInfo(ConnectionInfo&& rhs) :
@@ -76,7 +84,7 @@ struct InternalQuery
   }
 
   InternalQuery(InternalQuery&& rhs) :
-    d_idstate(std::move(rhs.d_idstate)), d_buffer(std::move(rhs.d_buffer)), d_proxyProtocolPayload(std::move(rhs.d_proxyProtocolPayload)), d_xfrMasterSerial(rhs.d_xfrMasterSerial), d_xfrSerialCount(rhs.d_xfrSerialCount), d_xfrMasterSerialCount(rhs.d_xfrMasterSerialCount), d_proxyProtocolPayloadAdded(rhs.d_proxyProtocolPayloadAdded)
+    d_idstate(std::move(rhs.d_idstate)), d_proxyProtocolPayload(std::move(rhs.d_proxyProtocolPayload)), d_buffer(std::move(rhs.d_buffer)), d_xfrMasterSerial(rhs.d_xfrMasterSerial), d_xfrSerialCount(rhs.d_xfrSerialCount), d_downstreamFailures(rhs.d_downstreamFailures), d_xfrMasterSerialCount(rhs.d_xfrMasterSerialCount), d_proxyProtocolPayloadAdded(rhs.d_proxyProtocolPayloadAdded)
   {
   }
   InternalQuery& operator=(InternalQuery&& rhs)
@@ -86,6 +94,7 @@ struct InternalQuery
     d_proxyProtocolPayload = std::move(rhs.d_proxyProtocolPayload);
     d_xfrMasterSerial = rhs.d_xfrMasterSerial;
     d_xfrSerialCount = rhs.d_xfrSerialCount;
+    d_downstreamFailures = rhs.d_downstreamFailures;
     d_xfrMasterSerialCount = rhs.d_xfrMasterSerialCount;
     d_proxyProtocolPayloadAdded = rhs.d_proxyProtocolPayloadAdded;
     return *this;
@@ -100,10 +109,11 @@ struct InternalQuery
   }
 
   IDState d_idstate;
-  PacketBuffer d_buffer;
   std::string d_proxyProtocolPayload;
+  PacketBuffer d_buffer;
   uint32_t d_xfrMasterSerial{0};
   uint32_t d_xfrSerialCount{0};
+  uint32_t d_downstreamFailures{0};
   uint8_t d_xfrMasterSerialCount{0};
   bool d_xfrStarted{false};
   bool d_proxyProtocolPayloadAdded{false};
@@ -111,7 +121,7 @@ struct InternalQuery
 
 using TCPQuery = InternalQuery;
 
-class TCPConnectionToBackend;
+class ConnectionToBackend;
 
 struct TCPResponse : public TCPQuery
 {
@@ -121,13 +131,13 @@ struct TCPResponse : public TCPQuery
     memset(&d_cleartextDH, 0, sizeof(d_cleartextDH));
   }
 
-  TCPResponse(PacketBuffer&& buffer, IDState&& state, std::shared_ptr<TCPConnectionToBackend> conn) :
+  TCPResponse(PacketBuffer&& buffer, IDState&& state, std::shared_ptr<ConnectionToBackend> conn) :
     TCPQuery(std::move(buffer), std::move(state)), d_connection(conn)
   {
     memset(&d_cleartextDH, 0, sizeof(d_cleartextDH));
   }
 
-  std::shared_ptr<TCPConnectionToBackend> d_connection{nullptr};
+  std::shared_ptr<ConnectionToBackend> d_connection{nullptr};
   dnsheader d_cleartextDH;
   bool d_selfGenerated{false};
 };
@@ -140,7 +150,7 @@ public:
   }
 
   virtual bool active() const = 0;
-  virtual const ClientState& getClientState() = 0;
+  virtual const ClientState* getClientState() const = 0;
   virtual void handleResponse(const struct timeval& now, TCPResponse&& response) = 0;
   virtual void handleXFRResponse(const struct timeval& now, TCPResponse&& response) = 0;
   virtual void notifyIOError(IDState&& query, const struct timeval& now) = 0;
@@ -188,7 +198,7 @@ public:
 
     uint64_t pos = d_pos++;
     ++d_queued;
-    return d_tcpclientthreads.at(pos % d_numthreads).d_newConnectionPipe;
+    return d_tcpclientthreads.at(pos % d_numthreads).d_newConnectionPipe.getHandle();
   }
 
   bool passConnectionToThread(std::unique_ptr<ConnectionInfo>&& conn)
@@ -198,10 +208,11 @@ public:
     }
 
     uint64_t pos = d_pos++;
-    auto pipe = d_tcpclientthreads.at(pos % d_numthreads).d_newConnectionPipe;
+    auto pipe = d_tcpclientthreads.at(pos % d_numthreads).d_newConnectionPipe.getHandle();
     auto tmp = conn.release();
 
     if (write(pipe, &tmp, sizeof(tmp)) != sizeof(tmp)) {
+      ++g_stats.tcpQueryPipeFull;
       delete tmp;
       tmp = nullptr;
       return false;
@@ -217,10 +228,11 @@ public:
     }
 
     uint64_t pos = d_pos++;
-    auto pipe = d_tcpclientthreads.at(pos % d_numthreads).d_crossProtocolQueryPipe;
+    auto pipe = d_tcpclientthreads.at(pos % d_numthreads).d_crossProtocolQueriesPipe.getHandle();
     auto tmp = cpq.release();
 
     if (write(pipe, &tmp, sizeof(tmp)) != sizeof(tmp)) {
+      ++g_stats.tcpCrossProtocolQueryPipeFull;
       delete tmp;
       tmp = nullptr;
       return false;
@@ -249,62 +261,30 @@ public:
     --d_queued;
   }
 
+private:
   void addTCPClientThread();
 
-private:
   struct TCPWorkerThread
   {
     TCPWorkerThread()
     {
     }
 
-    TCPWorkerThread(int newConnPipe, int crossProtocolPipe) :
-      d_newConnectionPipe(newConnPipe), d_crossProtocolQueryPipe(crossProtocolPipe)
+    TCPWorkerThread(int newConnPipe, int crossProtocolQueriesPipe, int crossProtocolResponsesPipe) :
+      d_newConnectionPipe(newConnPipe), d_crossProtocolQueriesPipe(crossProtocolQueriesPipe), d_crossProtocolResponsesPipe(crossProtocolResponsesPipe)
     {
     }
 
-    TCPWorkerThread(TCPWorkerThread&& rhs) :
-      d_newConnectionPipe(rhs.d_newConnectionPipe), d_crossProtocolQueryPipe(rhs.d_crossProtocolQueryPipe)
-    {
-      rhs.d_newConnectionPipe = -1;
-      rhs.d_crossProtocolQueryPipe = -1;
-    }
-
-    TCPWorkerThread& operator=(TCPWorkerThread&& rhs)
-    {
-      if (d_newConnectionPipe != -1) {
-        close(d_newConnectionPipe);
-      }
-      if (d_crossProtocolQueryPipe != -1) {
-        close(d_crossProtocolQueryPipe);
-      }
-
-      d_newConnectionPipe = rhs.d_newConnectionPipe;
-      d_crossProtocolQueryPipe = rhs.d_crossProtocolQueryPipe;
-      rhs.d_newConnectionPipe = -1;
-      rhs.d_crossProtocolQueryPipe = -1;
-
-      return *this;
-    }
-
+    TCPWorkerThread(TCPWorkerThread&& rhs) = default;
+    TCPWorkerThread& operator=(TCPWorkerThread&& rhs) = default;
     TCPWorkerThread(const TCPWorkerThread& rhs) = delete;
     TCPWorkerThread& operator=(const TCPWorkerThread&) = delete;
 
-    ~TCPWorkerThread()
-    {
-      if (d_newConnectionPipe != -1) {
-        close(d_newConnectionPipe);
-      }
-      if (d_crossProtocolQueryPipe != -1) {
-        close(d_crossProtocolQueryPipe);
-      }
-    }
-
-    int d_newConnectionPipe{-1};
-    int d_crossProtocolQueryPipe{-1};
+    FDWrapper d_newConnectionPipe;
+    FDWrapper d_crossProtocolQueriesPipe;
+    FDWrapper d_crossProtocolResponsesPipe;
   };
 
-  std::mutex d_mutex;
   std::vector<TCPWorkerThread> d_tcpclientthreads;
   stat_t d_numthreads{0};
   stat_t d_pos{0};

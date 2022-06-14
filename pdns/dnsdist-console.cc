@@ -105,7 +105,7 @@ static void feedConfigDelta(const std::string& line)
     return;
   struct timeval now;
   gettimeofday(&now, 0);
-  g_confDelta.push_back({now,line});
+  g_confDelta.emplace_back(now, line);
 }
 
 static string historyFile(const bool &ignoreHOME = false)
@@ -403,6 +403,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "addACL", true, "netmask", "add to the ACL set who can use this server" },
   { "addAction", true, "DNS rule, DNS action [, {uuid=\"UUID\", name=\"name\"}]", "add a rule" },
   { "addBPFFilterDynBlocks", true, "addresses, dynbpf[[, seconds=10], msg]", "This is the eBPF equivalent of addDynBlocks(), blocking a set of addresses for (optionally) a number of seconds, using an eBPF dynamic filter" },
+  { "addCapabilitiesToRetain", true, "capability or list of capabilities", "Linux capabilities to retain after startup, like CAP_BPF" },
   { "addConsoleACL", true, "netmask", "add a netmask to the console ACL" },
   { "addDNSCryptBind", true, "\"127.0.0.1:8443\", \"provider name\", \"/path/to/resolver.cert\", \"/path/to/resolver.key\", {reusePort=false, tcpFastOpenQueueSize=0, interface=\"\", cpus={}}", "listen to incoming DNSCrypt queries on 127.0.0.1 port 8443, with a provider name of `provider name`, using a resolver certificate and associated key stored respectively in the `resolver.cert` and `resolver.key` files. The fifth optional parameter is a table of parameters" },
   { "addDOHLocal", true, "addr, certFile, keyFile [, urls [, vars]]", "listen to incoming DNS over HTTPS queries on the specified address using the specified certificate and key. The last two parameters are tables" },
@@ -472,6 +473,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "getTLSFrontend", true, "n", "returns the TLS frontend with index n" },
   { "getTLSFrontendCount", true, "", "returns the number of DoT listeners" },
   { "grepq", true, "Netmask|DNS Name|100ms|{\"::1\", \"powerdns.com\", \"100ms\"} [, n]", "shows the last n queries and responses matching the specified client address or range (Netmask), or the specified DNS Name, or slower than 100ms" },
+  { "hashPassword", true, "password [, workFactor]", "Returns a hashed and salted version of the supplied password, usable with 'setWebserverConfig()'"},
   { "HTTPHeaderRule", true, "name, regex", "matches DoH queries with a HTTP header 'name' whose content matches the regular expression 'regex'"},
   { "HTTPPathRegexRule", true, "regex", "matches DoH queries whose HTTP path matches 'regex'"},
   { "HTTPPathRule", true, "path", "matches DoH queries whose HTTP path is an exact match to 'path'"},
@@ -532,6 +534,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "newServer", true, "{address=\"ip:port\", qps=1000, order=1, weight=10, pool=\"abuse\", retries=5, tcpConnectTimeout=5, tcpSendTimeout=30, tcpRecvTimeout=30, checkName=\"a.root-servers.net.\", checkType=\"A\", maxCheckFailures=1, mustResolve=false, useClientSubnet=true, source=\"address|interface name|address@interface\", sockets=1, reconnectOnUp=false}", "instantiate a server" },
   { "newServerPolicy", true, "name, function", "create a policy object from a Lua function" },
   { "newSuffixMatchNode", true, "", "returns a new SuffixMatchNode" },
+  { "newSVCRecordParameters", true, "priority, target, mandatoryParams, alpns, noDefaultAlpn [, port [, ech [, ipv4hints [, ipv6hints [, additionalParameters ]]]]]", "return a new SVCRecordParameters object, to use with SpoofSVCAction" },
   { "NegativeAndSOAAction", true, "nxd, zone, ttl, mname, rname, serial, refresh, retry, expire, minimum [, options]", "Turn a query into a NXDomain or NoData answer and sets a SOA record in the additional section" },
   { "NoneAction", true, "", "Does nothing. Subsequent rules are processed after this action" },
   { "NotRule", true, "selector", "Matches the traffic if the selector rule does not match" },
@@ -539,6 +542,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "OrRule", true, "selectors", "Matches the traffic if one or more of the the selectors rules does match" },
   { "PoolAction", true, "poolname", "set the packet into the specified pool" },
   { "PoolAvailableRule", true, "poolname", "Check whether a pool has any servers available to handle queries" },
+  { "PoolOutstandingRule", true, "poolname, limit", "Check whether a pool has outstanding queries above limit" },
   { "printDNSCryptProviderFingerprint", true, "\"/path/to/providerPublic.key\"", "display the fingerprint of the provided resolver public key" },
   { "ProbaRule", true, "probability", "Matches queries with a given probability. 1.0 means always" },
   { "ProxyProtocolValueRule", true, "type [, value]", "matches queries with a specified Proxy Protocol TLV value of that type, optionally matching the content of the option as well" },
@@ -582,6 +586,8 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "setConsoleMaximumConcurrentConnections", true, "max", "Set the maximum number of concurrent console connections" },
   { "setConsoleOutputMaxMsgSize", true, "messageSize", "set console message maximum size in bytes, default is 10 MB" },
   { "setDefaultBPFFilter", true, "filter", "When used at configuration time, the corresponding BPFFilter will be attached to every bind" },
+  { "setDoHDownstreamCleanupInterval", true, "interval", "minimum interval in seconds between two cleanups of the idle DoH downstream connections" },
+  { "setDoHDownstreamMaxIdleTime", true, "time", "Maximum time in seconds that a downstream DoH connection to a backend might stay idle" },
   { "setDynBlocksAction", true, "action", "set which action is performed when a query is blocked. Only DNSAction.Drop (the default) and DNSAction.Refused are supported" },
   { "setDynBlocksPurgeInterval", true, "sec", "set how often the expired dynamic block entries should be removed" },
   { "setDropEmptyQueries", true, "drop", "Whether to drop empty queries right away instead of sending a NOTIMP response" },
@@ -590,6 +596,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "setECSSourcePrefixV6", true, "prefix-length", "the EDNS Client Subnet prefix-length used for IPv6 queries" },
   { "setKey", true, "key", "set access key to that key" },
   { "setLocal", true, "addr [, {doTCP=true, reusePort=false, tcpFastOpenQueueSize=0, interface=\"\", cpus={}}]", "reset the list of addresses we listen on to this address" },
+  { "setMaxCachedDoHConnectionsPerDownstream", true, "max", "Set the maximum number of inactive DoH connections to a backend cached by each worker DoH thread" },
   { "setMaxCachedTCPConnectionsPerDownstream", true, "max", "Set the maximum number of inactive TCP connections to a backend cached by each worker TCP thread" },
   { "setMaxTCPClientThreads", true, "n", "set the maximum of TCP client threads, handling TCP connections" },
   { "setMaxTCPConnectionDuration", true, "n", "set the maximum duration of an incoming TCP connection, in seconds. 0 means unlimited" },
@@ -621,6 +628,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "setStaleCacheEntriesTTL", true, "n", "allows using cache entries expired for at most n seconds when there is no backend available to answer for a query" },
   { "setSyslogFacility", true, "facility", "set the syslog logging facility to 'facility'. Defaults to LOG_DAEMON" },
   { "setTCPDownstreamCleanupInterval", true, "interval", "minimum interval in seconds between two cleanups of the idle TCP downstream connections" },
+  { "setTCPDownstreamMaxIdleTime", true, "time", "Maximum time in seconds that a downstream TCP connection to a backend might stay idle" },
   { "setTCPInternalPipeBufferSize", true, "size", "Set the size in bytes of the internal buffer of the pipes used internally to distribute connections to TCP (and DoT) workers threads" },
   { "setTCPRecvTimeout", true, "n", "set the read timeout on TCP connections from the client, in seconds" },
   { "setTCPSendTimeout", true, "n", "set the write timeout on TCP connections from the client, in seconds" },
@@ -661,7 +669,9 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "SetECSOverrideAction", true, "override", "Whether an existing EDNS Client Subnet value should be overridden (true) or not (false). Subsequent rules are processed after this action" },
   { "SetECSPrefixLengthAction", true, "v4, v6", "Set the ECS prefix length. Subsequent rules are processed after this action" },
   { "SetMacAddrAction", true, "option", "Add the source MAC address to the query as EDNS0 option option. This action is currently only supported on Linux. Subsequent rules are processed after this action" },
+  { "SetEDNSOptionAction", true, "option, data", "Add arbitrary EDNS option and data to the query. Subsequent rules are processed after this action" },
   { "SetNoRecurseAction", true, "", "strip RD bit from the question, let it go through" },
+  { "setOutgoingDoHWorkerThreads", true, "n", "Number of outgoing DoH worker threads" },
   { "SetProxyProtocolValuesAction", true, "values", "Set the Proxy-Protocol values for this queries to 'values'" },
   { "SetSkipCacheAction", true, "", "Don’t lookup the cache for this query, don’t store the answer" },
   { "SetSkipCacheResponseAction", true, "", "Don’t store this response into the cache" },
@@ -674,6 +684,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "SpoofAction", true, "ip|list of ips [, options]", "forge a response with the specified IPv4 (for an A query) or IPv6 (for an AAAA). If you specify multiple addresses, all that match the query type (A, AAAA or ANY) will get spoofed in" },
   { "SpoofCNAMEAction", true, "cname [, options]", "Forge a response with the specified CNAME value" },
   { "SpoofRawAction", true, "raw|list of raws [, options]", "Forge a response with the specified record data as raw bytes. If you specify multiple raws (it is assumed they match the query type), all will get spoofed in" },
+  { "SpoofSVCAction", true, "list of svcParams [, options]", "Forge a response with the specified SVC record data" } ,
   { "SuffixMatchNodeRule", true, "smn[, quiet]", "Matches based on a group of domain suffixes for rapid testing of membership. Pass true as second parameter to prevent listing of all domains matched" },
   { "TagRule", true, "name [, value]", "matches if the tag named 'name' is present, with the given 'value' matching if any" },
   { "TCAction", true, "", "create answer to query with TC and RD bits set, to move to TCP" },

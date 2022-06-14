@@ -110,9 +110,8 @@ public:
 
   ReadLock(const ReadLock& rhs) = delete;
   ReadLock& operator=(const ReadLock& rhs) = delete;
-  ReadLock(ReadLock&& rhs)
+  ReadLock(ReadLock&& rhs) : d_lock(std::move(rhs.d_lock))
   {
-    d_lock = std::move(rhs.d_lock);
   }
 
 private:
@@ -136,9 +135,8 @@ public:
 
   WriteLock(const WriteLock& rhs) = delete;
   WriteLock& operator=(const WriteLock& rhs) = delete;
-  WriteLock(WriteLock&& rhs)
+  WriteLock(WriteLock&& rhs) : d_lock(std::move(rhs.d_lock))
   {
-    d_lock = std::move(rhs.d_lock);
   }
 
 private:
@@ -288,6 +286,11 @@ public:
   LockGuardedHolder<T> lock()
   {
     return LockGuardedHolder<T>(d_value, d_mutex);
+  }
+
+  LockGuardedHolder<const T> read_only_lock() const
+  {
+    return LockGuardedHolder<const T>(d_value, d_mutex);
   }
 
 private:

@@ -1,6 +1,7 @@
 #include "config.h"
 #include <boost/format.hpp>
 #include <boost/container/string.hpp>
+#include "credentials.hh"
 #include "dnsparser.hh"
 #include "sstuff.hh"
 #include "misc.hh"
@@ -11,6 +12,12 @@
 #include "uuid-utils.hh"
 #include "dnssecinfra.hh"
 #include "lock.hh"
+#include "dns_random.hh"
+#include "arguments.hh"
+
+#if defined(HAVE_LIBSODIUM)
+#include <sodium.h>
+#endif
 
 #ifndef RECURSOR
 #include "statbag.hh"
@@ -35,8 +42,8 @@ template<typename C> void doRun(const C& cmd, int mseconds=100)
   it.it_interval.tv_sec=0;
   it.it_interval.tv_usec=0;
 
-  signal(SIGVTALRM, alarmHandler);
-  setitimer(ITIMER_VIRTUAL, &it, 0);
+  signal(SIGPROF, alarmHandler);
+  setitimer(ITIMER_PROF, &it, 0);
 
   unsigned int runs=0;
   g_stop=false;
@@ -1028,6 +1035,110 @@ private:
   bool d_contended;
 };
 
+struct CredentialsHashTest
+{
+  explicit CredentialsHashTest() {}
+
+  string getName() const
+  {
+    return "Credentials hashing test";
+  }
+
+  void operator()() const
+  {
+    hashPassword(d_password);
+  }
+
+private:
+  const std::string d_password{"test password"};
+};
+
+struct RndSpeedTest
+{
+  explicit RndSpeedTest(std::string which) : name(which){
+    ::arg().set("entropy-source", "If set, read entropy from this file")="/dev/urandom";
+    ::arg().set("rng", "") = which;
+    dns_random_init("", true);
+  }
+  string getName() const
+  {
+    return "Random test " + name;
+  }
+
+  void operator()() const
+  {
+    dns_random_uint16();
+  }
+
+  const std::string name;
+};
+
+struct CredentialsVerifyTest
+{
+  explicit CredentialsVerifyTest() {
+    d_hashed = hashPassword(d_password);
+  }
+
+  string getName() const
+  {
+    return "Credentials verification test";
+  }
+
+  void operator()() const
+  {
+    verifyPassword(d_hashed, d_password);
+  }
+
+private:
+  std::string d_hashed;
+  const std::string d_password{"test password"};
+};
+
+struct BurtleHashTest
+{
+  explicit BurtleHashTest(const string& str) : d_name(str) {}
+
+  string getName() const
+  {
+    return "BurtleHash";
+  }
+
+  void operator()() const
+  {
+    burtle(reinterpret_cast<const unsigned char*>(d_name.data()), d_name.length(), 0);
+
+  }
+
+private:
+  const string d_name;
+};
+
+
+#if defined(HAVE_LIBSODIUM)
+struct SipHashTest
+{
+  explicit SipHashTest(const string& str) : d_name(str)
+  {
+    crypto_shorthash_keygen(d_key);
+  }
+
+  string getName() const
+  {
+    return "SipHash";
+  }
+
+  void operator()() const
+  {
+    unsigned char out[crypto_shorthash_BYTES];
+    crypto_shorthash(out, reinterpret_cast<const unsigned char*>(d_name.data()), d_name.length(), d_key);
+  }
+
+private:
+  const string d_name;
+  unsigned char d_key[crypto_shorthash_KEYBYTES];
+};
+#endif
+
 int main(int argc, char** argv)
 try
 {
@@ -1134,6 +1245,20 @@ try
 
   doRun(UUIDGenTest());
 
+#if defined(HAVE_GETRANDOM)
+  doRun(RndSpeedTest("getrandom"));
+#endif
+#if defined(HAVE_ARC4RANDOM)
+  doRun(RndSpeedTest("arc4random"));
+#endif
+#if defined(HAVE_RANDOMBYTES_STIR)
+  doRun(RndSpeedTest("sodium"));
+#endif
+#if defined(HAVE_RAND_BYTES)
+  doRun(RndSpeedTest("openssl"));
+#endif
+  doRun(RndSpeedTest("urandom"));
+
   doRun(NSEC3HashTest(1, "ABCD"));
   doRun(NSEC3HashTest(10, "ABCD"));
   doRun(NSEC3HashTest(50, "ABCD"));
@@ -1146,6 +1271,11 @@ try
   doRun(NSEC3HashTest(150, "ABCDABCDABCDABCDABCDABCDABCDABCD"));
   doRun(NSEC3HashTest(500, "ABCDABCDABCDABCDABCDABCDABCDABCD"));
 
+#if defined(HAVE_LIBSODIUM) && defined(HAVE_EVP_PKEY_CTX_SET1_SCRYPT_SALT)
+  doRun(CredentialsHashTest());
+  doRun(CredentialsVerifyTest());
+#endif
+
 #ifndef RECURSOR
   S.doRings();
 
@@ -1156,10 +1286,20 @@ try
   doRun(StatRingDNSNameQTypeTest(DNSName("example.com"), QType(1)));
 #endif
 
-  cerr<<"Total runs: " << g_totalRuns<<endl;
+  doRun(BurtleHashTest("a string of chars"));
+#ifdef HAVE_LIBSODIUM
+  doRun(SipHashTest("a string of chars"));
+#endif
 
+  cerr<<"Total runs: " << g_totalRuns<<endl;
 }
 catch(std::exception &e)
 {
   cerr<<"Fatal: "<<e.what()<<endl;
+}
+
+ArgvMap& arg()
+{	
+  static ArgvMap theArg;
+  return theArg;
 }

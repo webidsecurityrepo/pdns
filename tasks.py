@@ -1,10 +1,12 @@
 from invoke import task
 from invoke.exceptions import Failure, UnexpectedExit
 
+import os
 import sys
 import time
 
 all_build_deps = [
+    'ccache',
     'libboost-all-dev',
     'libluajit-5.1-dev',
     'libsodium-dev',
@@ -49,6 +51,20 @@ rec_build_deps = [
     'libfstrm-dev',
     'libsnmp-dev',
 ]
+rec_bulk_deps = [
+    'curl',
+    'libboost-all-dev',
+    'libcap2',
+    'libfstrm0',
+    'libluajit-5.1-2',
+    'libsnmp35',
+    'libsodium23',
+    'libssl1.1',
+    'libsystemd0',
+    'moreutils',
+    'pdns-tools',
+    'unzip'
+]
 dnsdist_build_deps = [
     'libcap-dev',
     'libcdb-dev',
@@ -57,6 +73,7 @@ dnsdist_build_deps = [
     'libgnutls28-dev',
     'libh2o-evloop-dev',
     'liblmdb-dev',
+    'libnghttp2-dev',
     'libre2-dev',
     'libsnmp-dev',
 ]
@@ -67,6 +84,7 @@ auth_test_deps = [   # FIXME: we should be generating some of these from shlibde
     'curl',
     'default-jre-headless',
     'dnsutils',
+    'faketime',
     'gawk',
     'ldnsutils',
     'libboost-serialization1.71.0',
@@ -87,7 +105,6 @@ auth_test_deps = [   # FIXME: we should be generating some of these from shlibde
     'libsystemd0',
     'libyaml-cpp0.6',
     'libzmq3-dev',
-    'pdns-recursor',
     'ruby-bundler',
     'ruby-dev',
     'socat',
@@ -105,14 +122,14 @@ def apt_fresh(c):
 @task
 def install_clang(c):
     """
-    install clang-11 and llvm-11
+    install clang-12 and llvm-12
     """
-    c.sudo('apt-get -qq -y --no-install-recommends install clang-11 llvm-11')
+    c.sudo('apt-get -qq -y --no-install-recommends install clang-12 llvm-12')
 
 @task
 def install_clang_runtime(c):
     # this gives us the symbolizer, for symbols in asan/ubsan traces
-    c.sudo('apt-get -qq -y --no-install-recommends install clang-11')
+    c.sudo('apt-get -qq -y --no-install-recommends install clang-12')
 
 @task
 def install_auth_build_deps(c):
@@ -127,7 +144,12 @@ auth_backend_test_deps = dict(
     gmysql=['default-libmysqlclient-dev'],
     gpgsql=['libpq-dev'],
     lmdb=[],
-    remote=[]
+    remote=[],
+    bind=[],
+    geoip=[],
+    lua2=[],
+    tinydns=[],
+    authpy=[]
 )
 
 @task(help={'backend': 'Backend to install test deps for, e.g. gsqlite3; can be repeated'}, iterable=['backend'], optional=['backend'])
@@ -144,24 +166,31 @@ def install_auth_test_deps(c, backend): # FIXME: rename this, we do way more tha
     #               rm jdnssec-tools-0.14.tar.gz
     #          fi
     #          echo 'export PATH=$HOME/jdnssec-tools-0.14/bin:$PATH' >> $BASH_ENV''')  # FIXME: why did this fail with no error?
-    c.run('touch regression-tests/tests/verify-dnssec-zone/allow-missing') # FIXME: can this go?
-    # FIXME we need to start a background recursor here for some tests
+    c.run('touch regression-tests/tests/verify-dnssec-zone/allow-missing regression-tests.nobackend/rectify-axfr/allow-missing') # FIXME: can this go?
+    # FIXME we may want to start a background recursor here to make ALIAS tests more robust
     setup_authbind(c)
 
 @task
+def install_rec_bulk_deps(c): # FIXME: rename this, we do way more than apt-get
+    c.sudo('apt-get --no-install-recommends -qq -y install ' + ' '.join(rec_bulk_deps))
+    c.run('chmod +x /opt/pdns-recursor/bin/* /opt/pdns-recursor/sbin/*')
+
+@task
 def install_rec_test_deps(c): # FIXME: rename this, we do way more than apt-get
-    c.sudo('apt-get --no-install-recommends install -qq -y authbind python3-venv python3-dev default-libmysqlclient-dev libpq-dev pdns-tools libluajit-5.1-2 \
-              libboost-all-dev \
-              libcap2 \
-              libssl1.1 \
-              libsystemd0 \
-              libsodium23 \
-              libfstrm0 \
-              libsnmp35')
+    c.sudo('apt-get --no-install-recommends install -qq -y ' + ' '.join(rec_bulk_deps) + ' \
+              pdns-server pdns-backend-bind daemontools \
+              jq libfaketime lua-posix lua-socket bc authbind \
+              python3-venv python3-dev default-libmysqlclient-dev libpq-dev \
+              protobuf-compiler snmpd prometheus')
 
     c.run('chmod +x /opt/pdns-recursor/bin/* /opt/pdns-recursor/sbin/*')
 
     setup_authbind(c)
+
+    c.run('sed "s/agentxperms 0700 0755 recursor/agentxperms 0777 0755/g" regression-tests.recursor-dnssec/snmpd.conf | sudo tee /etc/snmp/snmpd.conf')
+    c.sudo('systemctl restart snmpd')
+    time.sleep(5)
+    c.sudo('chmod 755 /var/agentx')
 
 @task
 def install_dnsdist_test_deps(c): # FIXME: rename this, we do way more than apt-get
@@ -175,6 +204,7 @@ def install_dnsdist_test_deps(c): # FIXME: rename this, we do way more than apt-
               libgnutls30 \
               libh2o-evloop0.13 \
               liblmdb0 \
+              libnghttp2-14 \
               libre2-5 \
               libssl-dev \
               libsystemd0 \
@@ -204,10 +234,10 @@ def ci_auth_configure(c):
     res = c.run('''CFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int" \
                    CXXFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int -Wp,-D_GLIBCXX_ASSERTIONS" \
                    ./configure \
-                      CC='clang-11' \
-                      CXX='clang++-11' \
+                      CC='clang-12' \
+                      CXX='clang++-12' \
                       --enable-option-checking=fatal \
-                      --with-modules='bind geoip gmysql godbc gpgsql gsqlite3 ldap lmdb lua2 pipe random remote tinydns' \
+                      --with-modules='bind geoip gmysql godbc gpgsql gsqlite3 ldap lmdb lua2 pipe remote tinydns' \
                       --enable-systemd \
                       --enable-tools \
                       --enable-unit-tests \
@@ -226,11 +256,12 @@ def ci_auth_configure(c):
         raise UnexpectedExit(res)
 @task
 def ci_rec_configure(c):
+    sanitizers = ' '.join('--enable-'+x for x in os.getenv('SANITIZERS').split('+'))
     res = c.run('''            CFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int" \
             CXXFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int -Wp,-D_GLIBCXX_ASSERTIONS" \
             ./configure \
-              CC='clang-11' \
-              CXX='clang++-11' \
+              CC='clang-12' \
+              CXX='clang++-12' \
               --enable-option-checking=fatal \
               --enable-unit-tests \
               --enable-nod \
@@ -240,20 +271,19 @@ def ci_rec_configure(c):
               --with-lua=luajit \
               --with-libcap \
               --with-net-snmp \
-              --enable-dns-over-tls \
-              --enable-asan \
-              --enable-ubsan''', warn=True)
+              --enable-dns-over-tls ''' + sanitizers, warn=True)
     if res.exited != 0:
         c.run('cat config.log')
         raise UnexpectedExit(res)
 
 @task
 def ci_dnsdist_configure(c):
+    sanitizers = ' '.join('--enable-'+x for x in os.getenv('SANITIZERS').split('+'))
     res = c.run('''CFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int" \
                    CXXFLAGS="-O1 -Werror=vla -Werror=shadow -Wformat=2 -Werror=format-security -Werror=string-plus-int -Wp,-D_GLIBCXX_ASSERTIONS" \
                    ./configure \
-                     CC='clang-11' \
-                     CXX='clang++-11' \
+                     CC='clang-12' \
+                     CXX='clang++-12' \
                      --enable-option-checking=fatal \
                      --enable-unit-tests \
                      --enable-dnstap \
@@ -266,9 +296,8 @@ def ci_dnsdist_configure(c):
                      --with-libsodium \
                      --with-lua=luajit \
                      --with-libcap \
-                     --with-re2 \
-                     --enable-asan \
-                     --enable-ubsan''', warn=True)
+                     --with-nghttp2 \
+                     --with-re2 ''' + sanitizers, warn=True)
     if res.exited != 0:
         c.run('cat config.log')
         raise UnexpectedExit(res)
@@ -295,7 +324,8 @@ def ci_auth_install_remotebackend_ruby_deps(c):
 def ci_auth_run_unit_tests(c):
     res = c.run('make check', warn=True)
     if res.exited != 0:
-      c.run('cat pdns/test-suite.log')
+      c.run('cat pdns/test-suite.log', warn=True)
+      c.run('cat modules/remotebackend/test-suite.log', warn=True)
       raise UnexpectedExit(res)
 
 @task
@@ -345,7 +375,46 @@ def test_api(c, product, backend=''):
         raise Failure('unknown product')
 
 backend_regress_tests = dict(
-    remote = ['pipe', 'unix', 'http', 'zeromq', 'pipe-dnssec', 'unix-dnssec', 'http-dnssec', 'zeromq-dnssec']
+    bind = [
+      'bind-both',
+      'bind-dnssec-both',
+      'bind-dnssec-nsec3-both',
+      'bind-dnssec-nsec3-optout-both',
+      'bind-dnssec-nsec3-narrow',
+    # FIXME  'bind-dnssec-pkcs11'
+    ],
+    geoip = [
+      'geoip',
+      'geoip-nsec3-narrow'
+      # FIXME: also run this with the mmdb we ship
+    ],
+    lua2 = [
+      'lua2',
+      'lua2-dnssec'
+    ],
+    tinydns = [
+      'tinydns'
+    ],
+    remote = [
+      'remotebackend-pipe',
+      'remotebackend-unix',
+      'remotebackend-http',
+      'remotebackend-zeromq',
+      'remotebackend-pipe-dnssec',
+      'remotebackend-unix-dnssec',
+      'remotebackend-http-dnssec',
+      'remotebackend-zeromq-dnssec'
+    ],
+    lmdb = [
+      'lmdb-nodnssec-both',
+      'lmdb-both',
+      'lmdb-nsec3-both',
+      'lmdb-nsec3-optout-both',
+      'lmdb-nsec3-narrow'
+    ],
+    gmysql   = ['gmysql',     'gmysql-nodnssec-both',   'gmysql-nsec3-both',   'gmysql-nsec3-optout-both',   'gmysql-nsec3-narrow',   'gmysql_sp-both'],
+    gpgsql   = ['gpgsql',     'gpgsql-nodnssec-both',   'gpgsql-nsec3-both',   'gpgsql-nsec3-optout-both',   'gpgsql-nsec3-narrow',   'gpgsql_sp-both'],
+    gsqlite3 = ['gsqlite3', 'gsqlite3-nodnssec-both', 'gsqlite3-nsec3-both', 'gsqlite3-nsec3-optout-both', 'gsqlite3-nsec3-narrow'],
 )
 
 @task
@@ -353,11 +422,28 @@ def test_auth_backend(c, backend):
     if backend == 'remote':
         ci_auth_install_remotebackend_ruby_deps(c)
 
+    if backend == 'authpy':
+        with c.cd('regression-tests.auth-py'):
+            c.run(f'PDNS=/opt/pdns-auth/sbin/pdns_server PDNS2=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig NOTIFY=/opt/pdns-auth/bin/pdns_notify NSEC3DIG=/opt/pdns-auth/bin/nsec3dig SAXFR=/opt/pdns-auth/bin/saxfr ZONE2SQL=/opt/pdns-auth/bin/zone2sql ZONE2LDAP=/opt/pdns-auth/bin/zone2ldap ZONE2JSON=/opt/pdns-auth/bin/zone2json PDNSUTIL=/opt/pdns-auth/bin/pdnsutil PDNSCONTROL=/opt/pdns-auth/bin/pdns_control PDNSSERVER=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig GMYSQLHOST=127.0.0.1 GMYSQL2HOST=127.0.0.1 MYSQL_HOST="127.0.0.1" PGHOST="127.0.0.1" PGPORT="5432" ./runtests')
+        return
+
     with c.cd('regression-tests'):
-        for t in backend_regress_tests[backend]:
+        if backend == 'lua2':
+            c.run('touch trustedkeys')  # avoid silly error during cleanup
+        for variant in backend_regress_tests[backend]:
             # FIXME this long line is terrible
-            # FIXME this appends 'backend' but that's only correct for 'remote'
-            c.run(f'PDNS=/opt/pdns-auth/sbin/pdns_server PDNS2=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig NOTIFY=/opt/pdns-auth/bin/pdns_notify NSEC3DIG=/opt/pdns-auth/bin/nsec3dig SAXFR=/opt/pdns-auth/bin/saxfr ZONE2SQL=/opt/pdns-auth/bin/zone2sql ZONE2LDAP=/opt/pdns-auth/bin/zone2ldap PDNSUTIL=/opt/pdns-auth/bin/pdnsutil PDNSCONTROL=/opt/pdns-auth/bin/pdns_control PDNSSERVER=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig MYSQL_HOST="127.0.0.1" PGHOST="127.0.0.1" PGPORT="5432" ./start-test-stop 5300 {backend}backend-{t}')
+            c.run(f'PDNS=/opt/pdns-auth/sbin/pdns_server PDNS2=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig NOTIFY=/opt/pdns-auth/bin/pdns_notify NSEC3DIG=/opt/pdns-auth/bin/nsec3dig SAXFR=/opt/pdns-auth/bin/saxfr ZONE2SQL=/opt/pdns-auth/bin/zone2sql ZONE2LDAP=/opt/pdns-auth/bin/zone2ldap ZONE2JSON=/opt/pdns-auth/bin/zone2json PDNSUTIL=/opt/pdns-auth/bin/pdnsutil PDNSCONTROL=/opt/pdns-auth/bin/pdns_control PDNSSERVER=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig GMYSQLHOST=127.0.0.1 GMYSQL2HOST=127.0.0.1 MYSQL_HOST="127.0.0.1" PGHOST="127.0.0.1" PGPORT="5432" ./start-test-stop 5300 {variant}')
+
+    if backend == 'gsqlite3':
+        with c.cd('regression-tests.nobackend'):
+            c.run(f'PDNS=/opt/pdns-auth/sbin/pdns_server PDNS2=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig NOTIFY=/opt/pdns-auth/bin/pdns_notify NSEC3DIG=/opt/pdns-auth/bin/nsec3dig SAXFR=/opt/pdns-auth/bin/saxfr ZONE2SQL=/opt/pdns-auth/bin/zone2sql ZONE2LDAP=/opt/pdns-auth/bin/zone2ldap ZONE2JSON=/opt/pdns-auth/bin/zone2json PDNSUTIL=/opt/pdns-auth/bin/pdnsutil PDNSCONTROL=/opt/pdns-auth/bin/pdns_control PDNSSERVER=/opt/pdns-auth/sbin/pdns_server SDIG=/opt/pdns-auth/bin/sdig GMYSQLHOST=127.0.0.1 GMYSQL2HOST=127.0.0.1 MYSQL_HOST="127.0.0.1" PGHOST="127.0.0.1" PGPORT="5432" ./runtests')
+        c.run('/opt/pdns-auth/bin/pdnsutil test-algorithms')
+        return
+
+@task
+def test_ixfrdist(c):
+    with c.cd('regression-tests.ixfrdist'):
+        c.run('IXFRDISTBIN=/opt/pdns-auth/bin/ixfrdist ./runtests')
 
 @task
 def test_dnsdist(c):
@@ -366,3 +452,25 @@ def test_dnsdist(c):
     c.run('ls -al /var/agentx/master')
     with c.cd('regression-tests.dnsdist'):
         c.run('DNSDISTBIN=/opt/dnsdist/bin/dnsdist ./runtests')
+
+@task
+def test_regression_recursor(c):
+    c.run('/opt/pdns-recursor/sbin/pdns_recursor --version')
+    c.run('PDNSRECURSOR=/opt/pdns-recursor/sbin/pdns_recursor RECCONTROL=/opt/pdns-recursor/bin/rec_control SKIP_IPV6_TESTS=y LIBFAKETIME=/bin/false ./build-scripts/test-recursor test_RecDnstap.py')
+    c.run('PDNSRECURSOR=/opt/pdns-recursor/sbin/pdns_recursor RECCONTROL=/opt/pdns-recursor/bin/rec_control SKIP_IPV6_TESTS=y ./build-scripts/test-recursor -I test_RecDnstap.py')
+
+@task
+def test_bulk_recursor(c, threads, mthreads, shards):
+    # We run an extremely small version of the bulk test, as GH does not seem to be able to handle the UDP load
+    with c.cd('regression-tests'):
+        c.run('curl -LO http://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip')
+        c.run('unzip top-1m.csv.zip -d .')
+        c.run('chmod +x /opt/pdns-recursor/bin/* /opt/pdns-recursor/sbin/*')
+        c.run(f'DNSBULKTEST=/usr/bin/dnsbulktest RECURSOR=/opt/pdns-recursor/sbin/pdns_recursor RECCONTROL=/opt/pdns-recursor/bin/rec_control THRESHOLD=95 TRACE=no ./timestamp ./recursor-test 5300 100 {threads} {mthreads} {shards}')
+
+# this is run always
+def setup():
+    if '/usr/lib/ccache' not in os.environ['PATH']:
+        os.environ['PATH']='/usr/lib/ccache:'+os.environ['PATH']
+
+setup()

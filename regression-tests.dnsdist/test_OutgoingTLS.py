@@ -13,6 +13,8 @@ class OutgoingTLSTests(object):
     _webServerPort = 8083
     _webServerBasicAuthPassword = 'secret'
     _webServerAPIKey = 'apisecret'
+    _webServerBasicAuthPasswordHashed = '$scrypt$ln=10,p=1,r=8$6DKLnvUYEeXWh3JNOd3iwg==$kSrhdHaRbZ7R74q3lGBqO1xetgxRxhmWzYJ2Qvfm7JM='
+    _webServerAPIKeyHashed = '$scrypt$ln=10,p=1,r=8$9v8JxDfzQVyTpBkTbkUqYg==$bDQzAOHeK1G9UvTPypNhrX48w974ZXbFPtRKS34+aso='
     _verboseMode = True
 
     def checkOnlyTLSResponderHit(self, numberOfTLSQueries=1):
@@ -50,6 +52,7 @@ class OutgoingTLSTests(object):
         numberOfUDPQueries = 10
         for _ in range(numberOfUDPQueries):
             (receivedQuery, receivedResponse) = self.sendUDPQuery(query, expectedResponse)
+            receivedQuery.id = query.id
             self.assertEqual(query, receivedQuery)
             self.assertEqual(receivedResponse, expectedResponse)
 
@@ -80,6 +83,7 @@ class OutgoingTLSTests(object):
         expectedResponse.answer.append(rrset)
 
         (receivedQuery, receivedResponse) = self.sendTCPQuery(query, expectedResponse)
+        receivedQuery.id = query.id
         self.assertEqual(query, receivedQuery)
         self.assertEqual(receivedResponse, expectedResponse)
         self.checkOnlyTLSResponderHit()
@@ -93,6 +97,8 @@ class BrokenOutgoingTLSTests(object):
     _webServerPort = 8083
     _webServerBasicAuthPassword = 'secret'
     _webServerAPIKey = 'apisecret'
+    _webServerBasicAuthPasswordHashed = '$scrypt$ln=10,p=1,r=8$6DKLnvUYEeXWh3JNOd3iwg==$kSrhdHaRbZ7R74q3lGBqO1xetgxRxhmWzYJ2Qvfm7JM='
+    _webServerAPIKeyHashed = '$scrypt$ln=10,p=1,r=8$9v8JxDfzQVyTpBkTbkUqYg==$bDQzAOHeK1G9UvTPypNhrX48w974ZXbFPtRKS34+aso='
 
     def checkNoResponderHit(self):
         self.assertNotIn('UDP Responder', self._responsesCounter)
@@ -130,7 +136,7 @@ class BrokenOutgoingTLSTests(object):
 
 class TestOutgoingTLSOpenSSL(DNSDistTest, OutgoingTLSTests):
     _tlsBackendPort = 10443
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='openssl', validateCertificates=true, caStore='ca.pem', subjectName='powerdns.com'}
@@ -150,7 +156,7 @@ class TestOutgoingTLSOpenSSL(DNSDistTest, OutgoingTLSTests):
 
 class TestOutgoingTLSGnuTLS(DNSDistTest, OutgoingTLSTests):
     _tlsBackendPort = 10444
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='gnutls', validateCertificates=true, caStore='ca.pem', subjectName='powerdns.com'}
@@ -171,7 +177,7 @@ class TestOutgoingTLSGnuTLS(DNSDistTest, OutgoingTLSTests):
 
 class TestOutgoingTLSOpenSSLWrongCertName(DNSDistTest, BrokenOutgoingTLSTests):
     _tlsBackendPort = 10445
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='openssl', validateCertificates=true, caStore='ca.pem', subjectName='not-powerdns.com'}
@@ -191,7 +197,7 @@ class TestOutgoingTLSOpenSSLWrongCertName(DNSDistTest, BrokenOutgoingTLSTests):
 
 class TestOutgoingTLSGnuTLSWrongCertName(DNSDistTest, BrokenOutgoingTLSTests):
     _tlsBackendPort = 10446
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='gnutls', validateCertificates=true, caStore='ca.pem', subjectName='not-powerdns.com'}
@@ -211,7 +217,7 @@ class TestOutgoingTLSGnuTLSWrongCertName(DNSDistTest, BrokenOutgoingTLSTests):
 
 class TestOutgoingTLSOpenSSLWrongCertNameButNoCheck(DNSDistTest, OutgoingTLSTests):
     _tlsBackendPort = 10447
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='openssl', validateCertificates=false, caStore='ca.pem', subjectName='not-powerdns.com'}
@@ -231,7 +237,7 @@ class TestOutgoingTLSOpenSSLWrongCertNameButNoCheck(DNSDistTest, OutgoingTLSTest
 
 class TestOutgoingTLSGnuTLSWrongCertNameButNoCheck(DNSDistTest, OutgoingTLSTests):
     _tlsBackendPort = 10448
-    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPassword', '_webServerAPIKey']
+    _config_params = ['_tlsBackendPort', '_webServerPort', '_webServerBasicAuthPasswordHashed', '_webServerAPIKeyHashed']
     _config_template = """
     setMaxTCPClientThreads(1)
     newServer{address="127.0.0.1:%s", tls='gnutls', validateCertificates=false, caStore='ca.pem', subjectName='not-powerdns.com'}

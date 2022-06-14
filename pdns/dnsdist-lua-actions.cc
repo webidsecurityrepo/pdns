@@ -27,12 +27,15 @@
 #include "dnsdist-lua-ffi.hh"
 #include "dnsdist-protobuf.hh"
 #include "dnsdist-kvs.hh"
+#include "dnsdist-svc.hh"
 
 #include "dolog.hh"
 #include "dnstap.hh"
+#include "dnswriter.hh"
 #include "ednsoptions.hh"
 #include "fstrm_logger.hh"
 #include "remote_logger.hh"
+#include "svc-records.hh"
 
 #include <boost/optional/optional_io.hpp>
 
@@ -353,6 +356,97 @@ public:
   ResponseConfig d_responseConfig;
 private:
   uint8_t d_rcode;
+};
+
+class SpoofSVCAction : public DNSAction
+{
+public:
+  SpoofSVCAction(const std::vector<std::pair<int, SVCRecordParameters>>& parameters)
+  {
+    d_payloads.reserve(parameters.size());
+
+    for (const auto& param : parameters) {
+      std::vector<uint8_t> payload;
+      if (!generateSVCPayload(payload, param.second)) {
+        throw std::runtime_error("Unable to generate a valid SVC record from the supplied parameters");
+      }
+
+      d_totalPayloadsSize += payload.size();
+      d_payloads.push_back(std::move(payload));
+
+      for (const auto& hint : param.second.ipv4hints) {
+        d_additionals4.insert({ param.second.target, ComboAddress(hint) });
+      }
+
+      for (const auto& hint : param.second.ipv6hints) {
+        d_additionals6.insert({ param.second.target, ComboAddress(hint) });
+      }
+    }
+  }
+
+  DNSAction::Action operator()(DNSQuestion* dq, std::string* ruleresult) const override
+  {
+    /* it will likely be a bit bigger than that because of additionals */
+    uint16_t numberOfRecords = d_payloads.size();
+    const auto qnameWireLength = dq->qname->wirelength();
+    if (dq->getMaximumSize() < (sizeof(dnsheader) + qnameWireLength + 4 + numberOfRecords*12 /* recordstart */ + d_totalPayloadsSize)) {
+      return Action::None;
+    }
+
+    PacketBuffer newPacket;
+    newPacket.reserve(sizeof(dnsheader) + qnameWireLength + 4 + numberOfRecords*12 /* recordstart */ + d_totalPayloadsSize);
+    GenericDNSPacketWriter<PacketBuffer> pw(newPacket, *dq->qname, dq->qtype);
+    for (const auto& payload : d_payloads) {
+      pw.startRecord(*dq->qname, dq->qtype, d_responseConfig.ttl);
+      pw.xfrBlob(payload);
+      pw.commit();
+    }
+
+    if (newPacket.size() < dq->getMaximumSize()) {
+      for (const auto& additional : d_additionals4) {
+        pw.startRecord(additional.first.isRoot() ? *dq->qname : additional.first, QType::A, d_responseConfig.ttl, QClass::IN, DNSResourceRecord::ADDITIONAL);
+        pw.xfrCAWithoutPort(4, additional.second);
+        pw.commit();
+      }
+    }
+
+    if (newPacket.size() < dq->getMaximumSize()) {
+      for (const auto& additional : d_additionals6) {
+        pw.startRecord(additional.first.isRoot() ? *dq->qname : additional.first, QType::AAAA, d_responseConfig.ttl, QClass::IN, DNSResourceRecord::ADDITIONAL);
+        pw.xfrCAWithoutPort(6, additional.second);
+        pw.commit();
+      }
+    }
+
+    if (g_addEDNSToSelfGeneratedResponses && queryHasEDNS(*dq)) {
+      bool dnssecOK = getEDNSZ(*dq) & EDNS_HEADER_FLAG_DO;
+      pw.addOpt(g_PayloadSizeSelfGenAnswers, 0, dnssecOK ? EDNS_HEADER_FLAG_DO : 0);
+      pw.commit();
+    }
+
+    if (newPacket.size() >= dq->getMaximumSize()) {
+      /* sorry! */
+      return Action::None;
+    }
+
+    pw.getHeader()->id = dq->getHeader()->id;
+    pw.getHeader()->qr = true; // for good measure
+    setResponseHeadersFromConfig(*pw.getHeader(), d_responseConfig);
+    dq->getMutableData() = std::move(newPacket);
+
+    return Action::HeaderModify;
+  }
+  std::string toString() const override
+  {
+    return "spoof SVC record ";
+  }
+
+  ResponseConfig d_responseConfig;
+private:
+  std::vector<std::vector<uint8_t>> d_payloads;
+  std::set<std::pair<DNSName, ComboAddress>> d_additionals4;
+  std::set<std::pair<DNSName, ComboAddress>> d_additionals6;
+  size_t d_totalPayloadsSize{0};
 };
 
 class TCAction : public DNSAction
@@ -722,7 +816,7 @@ DNSAction::Action SpoofAction::operator()(DNSQuestion* dq, std::string* ruleresu
   }
 
   unsigned int qnameWireLength=0;
-  DNSName ignore((char*)dq->getData().data(), dq->getData().size(), sizeof(dnsheader), false, 0, 0, &qnameWireLength);
+  DNSName ignore(reinterpret_cast<const char*>(dq->getData().data()), dq->getData().size(), sizeof(dnsheader), false, 0, 0, &qnameWireLength);
 
   if (dq->getMaximumSize() < (sizeof(dnsheader) + qnameWireLength + 4 + numberOfRecords*12 /* recordstart */ + totrdatalen)) {
     return Action::None;
@@ -794,7 +888,7 @@ DNSAction::Action SpoofAction::operator()(DNSQuestion* dq, std::string* ruleresu
       dest += sizeof(recordstart);
 
       memcpy(dest,
-             addr.sin4.sin_family == AF_INET ? (void*)&addr.sin4.sin_addr.s_addr : (void*)&addr.sin6.sin6_addr.s6_addr,
+             addr.sin4.sin_family == AF_INET ? reinterpret_cast<const void*>(&addr.sin4.sin_addr.s_addr) : reinterpret_cast<const void*>(&addr.sin6.sin6_addr.s6_addr),
              addr.sin4.sin_family == AF_INET ? sizeof(addr.sin4.sin_addr.s_addr) : sizeof(addr.sin6.sin6_addr.s6_addr));
       dest += (addr.sin4.sin_family == AF_INET ? sizeof(addr.sin4.sin_addr.s_addr) : sizeof(addr.sin6.sin6_addr.s6_addr));
       dq->getHeader()->ancount++;
@@ -815,13 +909,11 @@ class SetMacAddrAction : public DNSAction
 public:
   // this action does not stop the processing
   SetMacAddrAction(uint16_t code) : d_code(code)
-  {}
+  {
+  }
+
   DNSAction::Action operator()(DNSQuestion* dq, std::string* ruleresult) const override
   {
-    if (dq->getHeader()->arcount) {
-      return Action::None;
-    }
-
     std::string mac = getMACAddress(*dq->remote);
     if (mac.empty()) {
       return Action::None;
@@ -830,19 +922,99 @@ public:
     std::string optRData;
     generateEDNSOption(d_code, mac, optRData);
 
+    if (dq->getHeader()->arcount) {
+      bool ednsAdded = false;
+      bool optionAdded = false;
+      PacketBuffer newContent;
+      newContent.reserve(dq->getData().size());
+
+      if (!slowRewriteEDNSOptionInQueryWithRecords(dq->getData(), newContent, ednsAdded, d_code, optionAdded, true, optRData)) {
+        return Action::None;
+      }
+
+      if (newContent.size() > dq->getMaximumSize()) {
+        return Action::None;
+      }
+
+      dq->getMutableData() = std::move(newContent);
+      if (!dq->ednsAdded && ednsAdded) {
+        dq->ednsAdded = true;
+      }
+
+      return Action::None;
+    }
+
     auto& data = dq->getMutableData();
     if (generateOptRR(optRData, data, dq->getMaximumSize(), g_EdnsUDPPayloadSize, 0, false)) {
       dq->getHeader()->arcount = htons(1);
+      // make sure that any EDNS sent by the backend is removed before forwarding the response to the client
+      dq->ednsAdded = true;
     }
 
     return Action::None;
   }
   std::string toString() const override
   {
-    return "add EDNS MAC (code="+std::to_string(d_code)+")";
+    return "add EDNS MAC (code=" + std::to_string(d_code) + ")";
   }
 private:
   uint16_t d_code{3};
+};
+
+
+class SetEDNSOptionAction : public DNSAction
+{
+public:
+  // this action does not stop the processing
+  SetEDNSOptionAction(uint16_t code, const std::string& data) : d_code(code), d_data(data)
+  {
+  }
+
+  DNSAction::Action operator()(DNSQuestion* dq, std::string* ruleresult) const override
+  {
+    std::string optRData;
+    generateEDNSOption(d_code, d_data, optRData);
+
+    if (dq->getHeader()->arcount) {
+      bool ednsAdded = false;
+      bool optionAdded = false;
+      PacketBuffer newContent;
+      newContent.reserve(dq->getData().size());
+
+      if (!slowRewriteEDNSOptionInQueryWithRecords(dq->getData(), newContent, ednsAdded, d_code, optionAdded, true, optRData)) {
+        return Action::None;
+      }
+
+      if (newContent.size() > dq->getMaximumSize()) {
+        return Action::None;
+      }
+
+      dq->getMutableData() = std::move(newContent);
+      if (!dq->ednsAdded && ednsAdded) {
+        dq->ednsAdded = true;
+      }
+
+      return Action::None;
+    }
+
+    auto& data = dq->getMutableData();
+    if (generateOptRR(optRData, data, dq->getMaximumSize(), g_EdnsUDPPayloadSize, 0, false)) {
+      dq->getHeader()->arcount = htons(1);
+      // make sure that any EDNS sent by the backend is removed before forwarding the response to the client
+      dq->ednsAdded = true;
+    }
+
+    return Action::None;
+  }
+
+  std::string toString() const override
+  {
+    return "add EDNS Option (code=" + std::to_string(d_code) + ")";
+  }
+
+private:
+  uint16_t d_code;
+  std::string d_data;
 };
 
 class SetNoRecurseAction : public DNSAction
@@ -1226,25 +1398,25 @@ private:
 
 static DnstapMessage::ProtocolType ProtocolToDNSTap(dnsdist::Protocol protocol)
 {
-  DnstapMessage::ProtocolType result;
-  switch (protocol) {
-  default:
-  case dnsdist::Protocol::DoUDP:
-  case dnsdist::Protocol::DNSCryptUDP:
-    result = DnstapMessage::ProtocolType::DoUDP;
-    break;
-  case dnsdist::Protocol::DoTCP:
-  case dnsdist::Protocol::DNSCryptTCP:
-    result = DnstapMessage::ProtocolType::DoTCP;
-    break;
-  case dnsdist::Protocol::DoT:
-    result = DnstapMessage::ProtocolType::DoT;
-    break;
-  case dnsdist::Protocol::DoH:
-    result = DnstapMessage::ProtocolType::DoH;
-    break;
+  if (protocol == dnsdist::Protocol::DoUDP) {
+    return DnstapMessage::ProtocolType::DoUDP;
   }
-  return result;
+  else if (protocol == dnsdist::Protocol::DoTCP) {
+    return DnstapMessage::ProtocolType::DoTCP;
+  }
+  else if (protocol == dnsdist::Protocol::DoT) {
+    return DnstapMessage::ProtocolType::DoT;
+  }
+  else if (protocol == dnsdist::Protocol::DoH) {
+    return DnstapMessage::ProtocolType::DoH;
+  }
+  else if (protocol == dnsdist::Protocol::DNSCryptUDP) {
+    return DnstapMessage::ProtocolType::DNSCryptUDP;
+  }
+  else if (protocol == dnsdist::Protocol::DNSCryptTCP) {
+    return DnstapMessage::ProtocolType::DNSCryptTCP;
+  }
+  throw std::runtime_error("Unhandled protocol for dnstap: " + protocol.toPrettyString());
 }
 
 class DnstapLogAction : public DNSAction, public boost::noncopyable
@@ -1362,11 +1534,7 @@ public:
   }
   DNSAction::Action operator()(DNSQuestion* dq, std::string* ruleresult) const override
   {
-    if (!dq->qTag) {
-      dq->qTag = std::make_shared<QTag>();
-    }
-
-    dq->qTag->insert({d_tag, d_value});
+    dq->setTag(d_tag, d_value);
 
     return Action::None;
   }
@@ -1542,11 +1710,7 @@ public:
   }
   DNSResponseAction::Action operator()(DNSResponse* dr, std::string* ruleresult) const override
   {
-    if (!dr->qTag) {
-      dr->qTag = std::make_shared<QTag>();
-    }
-
-    dr->qTag->insert({d_tag, d_value});
+    dr->setTag(d_tag, d_value);
 
     return Action::None;
   }
@@ -1646,11 +1810,7 @@ public:
       }
     }
 
-    if (!dq->qTag) {
-      dq->qTag = std::make_shared<QTag>();
-    }
-
-    dq->qTag->insert({d_tag, std::move(result)});
+    dq->setTag(d_tag, std::move(result));
 
     return Action::None;
   }
@@ -1684,11 +1844,7 @@ public:
       }
     }
 
-    if (!dq->qTag) {
-      dq->qTag = std::make_shared<QTag>();
-    }
-
-    dq->qTag->insert({d_tag, std::move(result)});
+    dq->setTag(d_tag, std::move(result));
 
     return Action::None;
   }
@@ -1955,6 +2111,10 @@ void setupLuaActions(LuaContext& luaCtx)
       return std::shared_ptr<DNSAction>(new SetMacAddrAction(code));
     });
 
+  luaCtx.writeFunction("SetEDNSOptionAction", [](int code, const std::string& data) {
+      return std::shared_ptr<DNSAction>(new SetEDNSOptionAction(code, data));
+    });
+
   luaCtx.writeFunction("MacAddrAction", [](int code) {
       warnlog("access to MacAddrAction is deprecated and will be removed in a future version, please use SetMacAddrAction instead");
       return std::shared_ptr<DNSAction>(new SetMacAddrAction(code));
@@ -1985,6 +2145,13 @@ void setupLuaActions(LuaContext& luaCtx)
 
       auto ret = std::shared_ptr<DNSAction>(new SpoofAction(addrs));
       auto sa = std::dynamic_pointer_cast<SpoofAction>(ret);
+      parseResponseConfig(vars, sa->d_responseConfig);
+      return ret;
+    });
+
+  luaCtx.writeFunction("SpoofSVCAction", [](const std::vector<std::pair<int, SVCRecordParameters>>& parameters, boost::optional<responseParams_t> vars) {
+      auto ret = std::shared_ptr<DNSAction>(new SpoofSVCAction(parameters));
+      auto sa = std::dynamic_pointer_cast<SpoofSVCAction>(ret);
       parseResponseConfig(vars, sa->d_responseConfig);
       return ret;
     });

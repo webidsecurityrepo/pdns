@@ -21,7 +21,20 @@
  */
 
 #include "dnsdist.hh"
+#include "dnsdist-nghttp2.hh"
+#include "dnsdist-tcp.hh"
 #include "dolog.hh"
+
+
+bool DownstreamState::passCrossProtocolQuery(std::unique_ptr<CrossProtocolQuery>&& cpq)
+{
+  if (d_dohPath.empty()) {
+    return g_tcpclientthreads && g_tcpclientthreads->passCrossProtocolQueryToThread(std::move(cpq));
+  }
+  else {
+    return g_dohClientThreads && g_dohClientThreads->passCrossProtocolQueryToThread(std::move(cpq));
+  }
+}
 
 bool DownstreamState::reconnect()
 {
@@ -151,22 +164,28 @@ void DownstreamState::setWeight(int newWeight)
   }
 }
 
-DownstreamState::DownstreamState(const ComboAddress& remote_, const ComboAddress& sourceAddr_, unsigned int sourceItf_, const std::string& sourceItfName_, size_t numberOfSockets, bool connect): sourceItfName(sourceItfName_), remote(remote_), idStates(connect ? g_maxOutstanding : 0), sourceAddr(sourceAddr_), sourceItf(sourceItf_), name(remote_.toStringWithPort()), nameWithAddr(remote_.toStringWithPort())
+DownstreamState::DownstreamState(const ComboAddress& remote_, const ComboAddress& sourceAddr_, unsigned int sourceItf_, const std::string& sourceItfName_): remote(remote_), sourceAddr(sourceAddr_), sourceItfName(sourceItfName_), name(remote_.toStringWithPort()), nameWithAddr(remote_.toStringWithPort()), sourceItf(sourceItf_)
 {
   id = getUniqueID();
   threadStarted.clear();
 
-  *(mplexer.lock()) = std::unique_ptr<FDMultiplexer>(FDMultiplexer::getMultiplexerSilent());
+  sw.start();
+}
 
+void DownstreamState::connectUDPSockets(size_t numberOfSockets)
+{
+  idStates.resize(g_maxOutstanding);
   sockets.resize(numberOfSockets);
+
+  if (sockets.size() > 1) {
+    *(mplexer.lock()) = std::unique_ptr<FDMultiplexer>(FDMultiplexer::getMultiplexerSilent());
+  }
+
   for (auto& fd : sockets) {
     fd = -1;
   }
 
-  if (connect && !IsAnyAddress(remote)) {
-    reconnect();
-    sw.start();
-  }
+  reconnect();
 }
 
 DownstreamState::~DownstreamState()
@@ -205,6 +224,17 @@ size_t ServerPool::countServers(bool upOnly)
   return count;
 }
 
+size_t ServerPool::poolLoad()
+{
+  size_t load = 0;
+  auto servers = d_servers.read_lock();
+  for (const auto& server : **servers) {
+    size_t serverOutstanding = std::get<1>(server)->outstanding.load();
+    load += serverOutstanding;
+  }
+  return load;
+}
+
 const std::shared_ptr<ServerPolicy::NumberedServerVector> ServerPool::getServers()
 {
   std::shared_ptr<ServerPolicy::NumberedServerVector> result;
@@ -221,7 +251,7 @@ void ServerPool::addServer(shared_ptr<DownstreamState>& server)
      as other threads might hold a copy. We can however update the pointer as long as we hold the lock. */
   unsigned int count = static_cast<unsigned int>((*servers)->size());
   auto newServers = std::make_shared<ServerPolicy::NumberedServerVector>(*(*servers));
-  newServers->push_back(make_pair(++count, server));
+  newServers->emplace_back(++count, server);
   /* we need to reorder based on the server 'order' */
   std::stable_sort(newServers->begin(), newServers->end(), [](const std::pair<unsigned int,std::shared_ptr<DownstreamState> >& a, const std::pair<unsigned int,std::shared_ptr<DownstreamState> >& b) {
       return a.second->order < b.second->order;

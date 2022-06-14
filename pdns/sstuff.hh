@@ -65,6 +65,9 @@ public:
 
   Socket& operator=(Socket&& rhs)
   {
+    if (d_socket != -1) {
+      close(d_socket);
+    }
     d_socket = rhs.d_socket;
     rhs.d_socket = -1;
     d_buffer = std::move(rhs.d_buffer);
@@ -96,7 +99,7 @@ public:
       throw NetworkError("Accepting a connection: "+stringerror());
     }
 
-    return std::unique_ptr<Socket>(new Socket(s));
+    return std::make_unique<Socket>(s);
   }
 
   //! Get remote address

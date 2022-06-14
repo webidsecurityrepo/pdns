@@ -37,7 +37,7 @@ void BaseLua4::loadString(const std::string &script) {
 void BaseLua4::getFeatures(Features &) { }
 
 void BaseLua4::prepareContext() {
-  d_lw = std::unique_ptr<LuaContext>(new LuaContext);
+  d_lw = std::make_unique<LuaContext>();
 
   // lua features available
   Features features;
@@ -244,7 +244,8 @@ void BaseLua4::prepareContext() {
                                        {"YXRRSET",  RCode::YXRRSet  },
                                        {"NXRRSET",  RCode::NXRRSet  },
                                        {"NOTAUTH",  RCode::NotAuth  },
-                                       {"NOTZONE",  RCode::NotZone  }};
+                                       {"NOTZONE",  RCode::NotZone  },
+                                       {"DROP",    -2               }}; // To give backport-incompatibility warning
   for(const auto& rcode : rcodes)
     d_pd.push_back({rcode.first, rcode.second});
 

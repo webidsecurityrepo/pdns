@@ -13,12 +13,13 @@ public:
   LocalHolders holders;
   LocalStateHolder<vector<DNSDistResponseRuleAction> > localRespRuleActions;
   std::unique_ptr<FDMultiplexer> mplexer{nullptr};
+  int crossProtocolResponsesPipe{-1};
 };
 
 class IncomingTCPConnectionState : public TCPQuerySender, public std::enable_shared_from_this<IncomingTCPConnectionState>
 {
 public:
-  IncomingTCPConnectionState(ConnectionInfo&& ci, TCPClientThreadData& threadData, const struct timeval& now): d_buffer(s_maxPacketCacheEntrySize), d_threadData(threadData), d_ci(std::move(ci)), d_handler(d_ci.fd, timeval{g_tcpRecvTimeout,0}, d_ci.cs->tlsFrontend ? d_ci.cs->tlsFrontend->getContext() : nullptr, now.tv_sec), d_ioState(make_unique<IOStateHandler>(*threadData.mplexer, d_ci.fd)), d_connectionStartTime(now)
+  IncomingTCPConnectionState(ConnectionInfo&& ci, TCPClientThreadData& threadData, const struct timeval& now): d_buffer(s_maxPacketCacheEntrySize), d_ci(std::move(ci)), d_handler(d_ci.fd, timeval{g_tcpRecvTimeout,0}, d_ci.cs->tlsFrontend ? d_ci.cs->tlsFrontend->getContext() : nullptr, now.tv_sec), d_connectionStartTime(now), d_ioState(make_unique<IOStateHandler>(*threadData.mplexer, d_ci.fd)), d_threadData(threadData)
   {
     d_origDest.reset();
     d_origDest.sin4.sin_family = d_ci.remote.sin4.sin_family;
@@ -104,9 +105,9 @@ public:
     return false;
   }
 
-  std::shared_ptr<TCPConnectionToBackend> getActiveDownstreamConnection(const std::shared_ptr<DownstreamState>& ds, const std::unique_ptr<std::vector<ProxyProtocolValue>>& tlvs);
+  std::shared_ptr<TCPConnectionToBackend> getOwnedDownstreamConnection(const std::shared_ptr<DownstreamState>& ds, const std::unique_ptr<std::vector<ProxyProtocolValue>>& tlvs);
   std::shared_ptr<TCPConnectionToBackend> getDownstreamConnection(std::shared_ptr<DownstreamState>& ds, const std::unique_ptr<std::vector<ProxyProtocolValue>>& tlvs, const struct timeval& now);
-  void registerActiveDownstreamConnection(std::shared_ptr<TCPConnectionToBackend>& conn);
+  void registerOwnedDownstreamConnection(std::shared_ptr<TCPConnectionToBackend>& conn);
 
   static size_t clearAllDownstreamConnections();
 
@@ -132,37 +133,37 @@ static void handleTimeout(std::shared_ptr<IncomingTCPConnectionState>& state, bo
     return d_ioState != nullptr;
   }
 
-  const ClientState& getClientState() override
+  const ClientState* getClientState() const override
   {
-    return *d_ci.cs;
+    return d_ci.cs;
   }
 
   std::string toString() const
   {
     ostringstream o;
-    o << "Incoming TCP connection from "<<d_ci.remote.toStringWithPort()<<" over FD "<<d_handler.getDescriptor()<<", state is "<<(int)d_state<<", io state is "<<(d_ioState ? std::to_string((int)d_ioState->getState()) : "empty")<<", queries count is "<<d_queriesCount<<", current queries count is "<<d_currentQueriesCount<<", "<<d_queuedResponses.size()<<" queued responses, "<<d_activeConnectionsToBackend.size()<<" active connections to a backend";
+    o << "Incoming TCP connection from "<<d_ci.remote.toStringWithPort()<<" over FD "<<d_handler.getDescriptor()<<", state is "<<(int)d_state<<", io state is "<<(d_ioState ? d_ioState->getState() : "empty")<<", queries count is "<<d_queriesCount<<", current queries count is "<<d_currentQueriesCount<<", "<<d_queuedResponses.size()<<" queued responses, "<<d_ownedConnectionsToBackend.size()<<" owned connections to a backend";
     return o.str();
   }
 
-  enum class State { doingHandshake, readingProxyProtocolHeader, waitingForQuery, readingQuerySize, readingQuery, sendingResponse, idle /* in case of XFR, we stop processing queries */ };
+  enum class State : uint8_t { doingHandshake, readingProxyProtocolHeader, waitingForQuery, readingQuerySize, readingQuery, sendingResponse, idle /* in case of XFR, we stop processing queries */ };
 
-  std::map<std::shared_ptr<DownstreamState>, std::deque<std::shared_ptr<TCPConnectionToBackend>>> d_activeConnectionsToBackend;
-  PacketBuffer d_buffer;
-  std::deque<TCPResponse> d_queuedResponses;
-  TCPClientThreadData& d_threadData;
   TCPResponse d_currentResponse;
+  std::map<std::shared_ptr<DownstreamState>, std::deque<std::shared_ptr<TCPConnectionToBackend>>> d_ownedConnectionsToBackend;
+  std::deque<TCPResponse> d_queuedResponses;
+  PacketBuffer d_buffer;
   ConnectionInfo d_ci;
   ComboAddress d_origDest;
   ComboAddress d_proxiedRemote;
   ComboAddress d_proxiedDestination;
   TCPIOHandler d_handler;
-  std::unique_ptr<IOStateHandler> d_ioState{nullptr};
-  std::unique_ptr<std::vector<ProxyProtocolValue>> d_proxyProtocolValues{nullptr};
   struct timeval d_connectionStartTime;
   struct timeval d_handshakeDoneTime;
   struct timeval d_firstQuerySizeReadTime;
   struct timeval d_querySizeReadTime;
   struct timeval d_queryReadTime;
+  std::unique_ptr<IOStateHandler> d_ioState{nullptr};
+  std::unique_ptr<std::vector<ProxyProtocolValue>> d_proxyProtocolValues{nullptr};
+  TCPClientThreadData& d_threadData;
   size_t d_currentPos{0};
   size_t d_proxyProtocolNeed{0};
   size_t d_queriesCount{0};

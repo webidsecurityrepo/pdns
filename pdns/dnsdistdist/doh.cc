@@ -201,6 +201,13 @@ struct DOHServerConfig
 
     h2o_config_init(&h2o_config);
     h2o_config.http2.idle_timeout = idleTimeout * 1000;
+    /* if you came here for a way to make the number of concurrent streams (concurrent requests per connection)
+       configurable, or even just bigger, I have bad news for you.
+       h2o_config.http2.max_concurrent_requests_per_connection (default of 100) is capped by
+       H2O_HTTP2_SETTINGS_HOST.max_concurrent_streams which is not configurable. Even if decided to change the
+       hard-coded value, libh2o's author warns that there might be parts of the code where the stream ID is stored
+       in 8 bits, making 256 a hard value: https://github.com/h2o/h2o/issues/805
+    */
   }
   DOHServerConfig(const DOHServerConfig&) = delete;
   DOHServerConfig& operator=(const DOHServerConfig&) = delete;
@@ -423,13 +430,13 @@ public:
     return true;
   }
 
-  const ClientState& getClientState() override
+  const ClientState* getClientState() const override
   {
     if (!du || !du->dsc || !du->dsc->cs) {
       throw std::runtime_error("No query associated to this DoHTCPCrossQuerySender");
     }
 
-    return *du->dsc->cs;
+    return du->dsc->cs;
   }
 
   void handleResponse(const struct timeval& now, TCPResponse&& response) override
@@ -458,7 +465,7 @@ public:
     double udiff = du->ids.sentTime.udiff();
     vinfolog("Got answer from %s, relayed to %s (https), took %f usec", du->downstream->remote.toStringWithPort(), du->ids.origRemote.toStringWithPort(), udiff);
 
-    handleResponseSent(du->ids, udiff, *dr.remote, du->downstream->remote, du->response.size(), cleartextDH);
+    handleResponseSent(du->ids, udiff, *dr.remote, du->downstream->remote, du->response.size(), cleartextDH, du->downstream->getProtocol());
 
     ++g_stats.responses;
     if (du->ids.cs) {
@@ -485,6 +492,7 @@ public:
       return;
     }
 
+    du->ids = std::move(query);
     du->status_code = 502;
     sendDoHUnitToTheMainThread(du, "cross-protocol error response");
     du->release();
@@ -501,6 +509,11 @@ public:
   DoHCrossProtocolQuery(DOHUnit* du_): du(du_)
   {
     query = InternalQuery(std::move(du->query), std::move(du->ids));
+    /* we _could_ remove it from the query buffer and put in query's d_proxyProtocolPayload,
+       clearing query.d_proxyProtocolPayloadAdded and du->proxyProtocolPayloadSize.
+       Leave it for now because we know that the onky case where the payload has been
+       added is when we tried over UDP, got a TC=1 answer and retried over TCP/DoT,
+       and we know the TCP/DoT code can handle it. */
     query.d_proxyProtocolPayloadAdded = du->proxyProtocolPayloadSize > 0;
     downstream = du->downstream;
     proxyProtocolPayloadSize = du->proxyProtocolPayloadSize;
@@ -541,7 +554,7 @@ static int processDOHQuery(DOHUnit* du)
       // outside of the main DoH thread
       return -1;
     }
-    remote = du->remote;
+    remote = du->ids.origRemote;
     DOHServerConfig* dsc = du->dsc;
     auto& holders = dsc->holders;
     ClientState& cs = *dsc->cs;
@@ -586,8 +599,8 @@ static int processDOHQuery(DOHUnit* du)
     uint16_t qtype, qclass;
     unsigned int qnameWireLength = 0;
     DNSName qname(reinterpret_cast<const char*>(du->query.data()), du->query.size(), sizeof(dnsheader), false, &qtype, &qclass, &qnameWireLength);
-    DNSQuestion dq(&qname, qtype, qclass, &du->dest, &du->remote, du->query, dnsdist::Protocol::DoH, &queryRealTime);
-    dq.ednsAdded = du->ednsAdded;
+    DNSQuestion dq(&qname, qtype, qclass, &du->ids.origDest, &du->ids.origRemote, du->query, dnsdist::Protocol::DoH, &queryRealTime);
+    dq.ednsAdded = du->ids.ednsAdded;
     dq.du = du;
     dq.sni = std::move(du->sni);
 
@@ -618,25 +631,33 @@ static int processDOHQuery(DOHUnit* du)
     }
 
     if (du->downstream->isTCPOnly()) {
-      auto cpq = std::make_unique<DoHCrossProtocolQuery>(du);
+      std::string proxyProtocolPayload;
+      /* we need to do this _before_ creating the cross protocol query because
+         after that the buffer will have been moved */
+      if (du->downstream->useProxyProtocol) {
+        proxyProtocolPayload = getProxyProtocolPayload(dq);
+      }
 
-      du->get();
-      du->tcp = true;
       du->ids.origID = htons(queryId);
       du->ids.cs = &cs;
       setIDStateFromDNSQuestion(du->ids, dq, std::move(qname));
 
-      if (g_tcpclientthreads && g_tcpclientthreads->passCrossProtocolQueryToThread(std::move(cpq))) {
+      /* this moves du->ids, careful! */
+      du->get();
+      auto cpq = std::make_unique<DoHCrossProtocolQuery>(du);
+      cpq->query.d_proxyProtocolPayload = std::move(proxyProtocolPayload);
+      du->tcp = true;
+      if (du->downstream->passCrossProtocolQuery(std::move(cpq))) {
         return 0;
       }
       else {
-        du->release();
+        /* do not release du here, it belongs to the DoHCrossProtocolQuery object */
         du->status_code = 502;
         return -1;
       }
     }
 
-    ComboAddress dest = du->dest;
+    ComboAddress dest = du->ids.origDest;
     unsigned int idOffset = (du->downstream->idOffset++) % du->downstream->idStates.size();
     IDState* ids = &du->downstream->idStates[idOffset];
     ids->age = 0;
@@ -802,11 +823,11 @@ static void doh_dispatch_query(DOHServerConfig* dsc, h2o_handler_t* self, h2o_re
     uint16_t qtype;
     DNSName qname(reinterpret_cast<const char*>(query.data()), query.size(), sizeof(dnsheader), false, &qtype);
 
-    auto du = std::unique_ptr<DOHUnit>(new DOHUnit);
+    auto du = std::make_unique<DOHUnit>();
     du->dsc = dsc;
     du->req = req;
-    du->dest = local;
-    du->remote = remote;
+    du->ids.origDest = local;
+    du->ids.origRemote = remote;
     du->rsock = dsc->dohresponsepair[0];
     du->query = std::move(query);
     du->path = std::move(path);
@@ -820,8 +841,8 @@ static void doh_dispatch_query(DOHServerConfig* dsc, h2o_handler_t* self, h2o_re
     du->query_at = req->query_at;
     du->headers.reserve(req->headers.size);
     for (size_t i = 0; i < req->headers.size; ++i) {
-      du->headers.push_back(std::make_pair(std::string(req->headers.entries[i].name->base, req->headers.entries[i].name->len),
-                                           std::string(req->headers.entries[i].value.base, req->headers.entries[i].value.len)));
+      du->headers.emplace_back(std::string(req->headers.entries[i].name->base, req->headers.entries[i].name->len),
+                               std::string(req->headers.entries[i].value.base, req->headers.entries[i].value.len));
     }
 
 #ifdef HAVE_H2O_SOCKET_GET_SSL_SERVER_NAME
@@ -947,16 +968,18 @@ static int doh_handler(h2o_handler_t *self, h2o_req_t *req)
       return 0;
     }
 
-    if (h2o_socket_get_ssl_session_reused(sock) == 0) {
-      ++dsc->cs->tlsNewSessions;
-    }
-    else {
-      ++dsc->cs->tlsResumptions;
-    }
-
     const int descriptor = h2o_socket_get_fd(sock);
     if (descriptor != -1) {
-      ++t_conns.at(descriptor).d_nbQueries;
+      auto& conn = t_conns.at(descriptor);
+      ++conn.d_nbQueries;
+      if (conn.d_nbQueries == 1) {
+        if (h2o_socket_get_ssl_session_reused(sock) == 0) {
+          ++dsc->cs->tlsNewSessions;
+        }
+        else {
+          ++dsc->cs->tlsResumptions;
+        }
+      }
     }
 
     if (auto tlsversion = h2o_socket_get_ssl_protocol_version(sock)) {
@@ -989,6 +1012,8 @@ static int doh_handler(h2o_handler_t *self, h2o_req_t *req)
     /* the responses map can be updated at runtime, so we need to take a copy of
        the shared pointer, increasing the reference counter */
     auto responsesMap = dsc->df->d_responsesMap;
+    /* 1 byte for the root label, 2 type, 2 class, 4 TTL (fake), 2 record length, 2 option length, 2 option code, 2 family, 1 source, 1 scope, 16 max for a full v6 */
+    const size_t maxAdditionalSizeForEDNS = 35U;
     if (responsesMap) {
       for (const auto& entry : *responsesMap) {
         if (entry->matches(path)) {
@@ -1007,9 +1032,8 @@ static int doh_handler(h2o_handler_t *self, h2o_req_t *req)
         ++dsc->df->d_http1Stats.d_nbQueries;
 
       PacketBuffer query;
-      /* We reserve at least 512 additional bytes to be able to add EDNS, but we also want
-         at least s_maxPacketCacheEntrySize bytes to be able to fill the answer from the packet cache */
-      query.reserve(std::max(req->entity.len + 512, s_maxPacketCacheEntrySize));
+      /* We reserve a few additional bytes to be able to add EDNS later */
+      query.reserve(req->entity.len + maxAdditionalSizeForEDNS);
       query.resize(req->entity.len);
       memcpy(query.data(), req->entity.base, req->entity.len);
       doh_dispatch_query(dsc, self, req, std::move(query), local, remote, std::move(path));
@@ -1036,10 +1060,9 @@ static int doh_handler(h2o_handler_t *self, h2o_req_t *req)
         PacketBuffer decoded;
 
         /* rough estimate so we hopefully don't need a new allocation later */
-        /* We reserve at least 512 additional bytes to be able to add EDNS, but we also want
-           at least s_maxPacketCacheEntrySize bytes to be able to fill the answer from the packet cache */
+        /* We reserve at few additional bytes to be able to add EDNS later */
         const size_t estimate = ((sdns.size() * 3) / 4);
-        decoded.reserve(std::max(estimate + 512, s_maxPacketCacheEntrySize));
+        decoded.reserve(estimate + maxAdditionalSizeForEDNS);
         if(B64Decode(sdns, decoded) < 0) {
           h2o_send_error_400(req, "Bad Request", "Unable to decode BASE64-URL", 0);
           ++dsc->df->d_badrequests;
@@ -1237,7 +1260,7 @@ static void dnsdistclient(int qsock)
         if (generateOptRR(std::string(), du->query, 4096, 4096, 0, false)) {
           dh = const_cast<struct dnsheader*>(reinterpret_cast<const struct dnsheader*>(du->query.data())); // may have reallocated
           dh->arcount = htons(1);
-          du->ednsAdded = true;
+          du->ids.ednsAdded = true;
         }
       }
       else {
@@ -1270,53 +1293,65 @@ static void dnsdistclient(int qsock)
    */
 static void on_dnsdist(h2o_socket_t *listener, const char *err)
 {
-  DOHUnit *du = nullptr;
-  DOHServerConfig* dsc = reinterpret_cast<DOHServerConfig*>(listener->data);
-  ssize_t got = read(dsc->dohresponsepair[1], &du, sizeof(du));
+  /* we want to read as many responses from the pipe as possible before
+     giving up. Even if we are overloaded and fighting with the DoH connections
+     for the CPU, the first thing we need to do is to send responses to free slots
+     anyway, otherwise queries and responses are piling up in our pipes, consuming
+     memory and likely coming up too late after the client has gone away */
+  while (true) {
+    DOHUnit *du = nullptr;
+    DOHServerConfig* dsc = reinterpret_cast<DOHServerConfig*>(listener->data);
+    ssize_t got = read(dsc->dohresponsepair[1], &du, sizeof(du));
 
-  if (got < 0) {
-    warnlog("Error reading a DOH internal response: %s", strerror(errno));
-    return;
-  }
-  else if (static_cast<size_t>(got) != sizeof(du)) {
-    return;
-  }
-
-  if (!du->req) { // it got killed in flight
-    du->self = nullptr;
-    du->release();
-    return;
-  }
-
-  if (!du->tcp && du->truncated && du->response.size() > sizeof(dnsheader)) {
-    /* restoring the original ID */
-    dnsheader* queryDH = reinterpret_cast<struct dnsheader*>(du->query.data() + du->proxyProtocolPayloadSize);
-    queryDH->id = du->ids.origID;
-
-    auto cpq = std::make_unique<DoHCrossProtocolQuery>(du);
-
-    du->get();
-    du->tcp = true;
-    du->truncated = false;
-
-    if (g_tcpclientthreads && g_tcpclientthreads->passCrossProtocolQueryToThread(std::move(cpq))) {
+    if (got < 0) {
+      if (errno != EWOULDBLOCK && errno != EAGAIN) {
+        errlog("Error reading a DOH internal response: %s", strerror(errno));
+      }
       return;
     }
-    else {
-      du->release();
+    else if (static_cast<size_t>(got) != sizeof(du)) {
+      errlog("Error reading a DoH internal response, got %d bytes instead of the expected %d", got, sizeof(du));
+      return;
     }
+
+    if (!du->req) { // it got killed in flight
+      du->self = nullptr;
+      du->release();
+      continue;
+    }
+
+    if (!du->tcp && du->truncated && du->response.size() > sizeof(dnsheader)) {
+      /* restoring the original ID */
+      dnsheader* queryDH = reinterpret_cast<struct dnsheader*>(du->query.data() + du->proxyProtocolPayloadSize);
+      queryDH->id = du->ids.origID;
+
+      auto cpq = std::make_unique<DoHCrossProtocolQuery>(du);
+
+      du->get();
+      du->tcp = true;
+      du->truncated = false;
+
+      if (g_tcpclientthreads && g_tcpclientthreads->passCrossProtocolQueryToThread(std::move(cpq))) {
+        continue;
+      }
+      else {
+        du->release();
+        vinfolog("Unable to pass DoH query to a TCP worker thread after getting a TC response over UDP");
+        continue;
+      }
+    }
+
+    if (du->self) {
+      // we are back in the h2o main thread now, so we don't risk
+      // a race (h2o killing the query) when accessing du->req anymore
+      *du->self = nullptr; // so we don't clean up again in on_generator_dispose
+      du->self = nullptr;
+    }
+
+    handleResponse(*dsc->df, du->req, du->status_code, du->response, dsc->df->d_customResponseHeaders, du->contentType, true);
+
+    du->release();
   }
-
-  if (du->self) {
-    // we are back in the h2o main thread now, so we don't risk
-    // a race (h2o killing the query) when accessing du->req anymore
-    *du->self = nullptr; // so we don't clean up again in on_generator_dispose
-    du->self = nullptr;
-  }
-
-  handleResponse(*dsc->df, du->req, du->status_code, du->response, dsc->df->d_customResponseHeaders, du->contentType, true);
-
-  du->release();
 }
 
 /* called when a TCP connection has been accepted, the TLS session has not been established */
@@ -1346,8 +1381,8 @@ static void on_accept(h2o_socket_t *listener, const char *err)
     return;
   }
 
-  if (concurrentConnections > dsc->cs->tcpMaxConcurrentConnections) {
-    dsc->cs->tcpMaxConcurrentConnections = concurrentConnections;
+  if (concurrentConnections > dsc->cs->tcpMaxConcurrentConnections.load()) {
+    dsc->cs->tcpMaxConcurrentConnections.store(concurrentConnections);
   }
 
   auto& conn = t_conns[descriptor];
@@ -1417,7 +1452,7 @@ static void setupTLSContext(DOHAcceptContext& acceptCtx,
   auto ctx = libssl_init_server_context(tlsConfig, acceptCtx.d_ocspResponses);
 
   if (tlsConfig.d_enableTickets && tlsConfig.d_numberOfTicketsKeys > 0) {
-    acceptCtx.d_ticketKeys = std::unique_ptr<OpenSSLTLSTicketKeysRing>(new OpenSSLTLSTicketKeysRing(tlsConfig.d_numberOfTicketsKeys));
+    acceptCtx.d_ticketKeys = std::make_unique<OpenSSLTLSTicketKeysRing>(tlsConfig.d_numberOfTicketsKeys);
     SSL_CTX_set_tlsext_ticket_key_cb(ctx.get(), &ticket_key_callback);
     libssl_set_ticket_key_callback_data(ctx.get(), &acceptCtx);
   }
@@ -1454,7 +1489,7 @@ static void setupAcceptContext(DOHAcceptContext& ctx, DOHServerConfig& dsc, bool
   nativeCtx->hosts = dsc.h2o_config.hosts;
   ctx.d_ticketsKeyRotationDelay = dsc.df->d_tlsConfig.d_ticketsKeyRotationDelay;
 
-  if (setupTLS && !dsc.df->d_tlsConfig.d_certKeyPairs.empty()) {
+  if (setupTLS && dsc.df->isHTTPS()) {
     try {
       setupTLSContext(ctx,
                       dsc.df->d_tlsConfig,
@@ -1518,7 +1553,7 @@ void DOHFrontend::setup()
 
   d_dsc = std::make_shared<DOHServerConfig>(d_idleTimeout, d_internalPipeBufferSize);
 
-  if  (!d_tlsConfig.d_certKeyPairs.empty()) {
+  if  (isHTTPS()) {
     try {
       setupTLSContext(*d_dsc->accept_ctx,
                       d_tlsConfig,
@@ -1632,7 +1667,7 @@ void DOHUnit::handleUDPResponse(PacketBuffer&& udpResponse, IDState&& state)
     double udiff = ids.sentTime.udiff();
     vinfolog("Got answer from %s, relayed to %s (https), took %f usec", downstream->remote.toStringWithPort(), ids.origRemote.toStringWithPort(), udiff);
 
-    handleResponseSent(ids, udiff, *dr.remote, downstream->remote, response.size(), cleartextDH);
+    handleResponseSent(ids, udiff, *dr.remote, downstream->remote, response.size(), cleartextDH, downstream->getProtocol());
 
     ++g_stats.responses;
     if (ids.cs) {

@@ -37,6 +37,15 @@ The ``.`` means ``order`` is a data member, while the ``:`` means ``addPool`` is
 Global configuration
 --------------------
 
+.. function:: addCapabilitiesToRetain(capabilities)
+
+  .. versionadded:: 1.7.0
+
+  Accept a Linux capability as a string, or a list of these, to retain after startup so that privileged operations can still be performed at runtime.
+  Keeping ``CAP_BPF`` on kernel 5.8+ for example allows loading eBPF programs and altering eBPF maps at runtime even if the ``kernel.unprivileged_bpf_disabled`` sysctl is set.
+  Note that this does not grant the capabilities to the process, doing so might be done by running it as root which we don't advise, or by adding capabilities via the systemd unit file, for example.
+  Please also be aware that switching to a different user via ``--uid`` will still drop all capabilities.
+
 .. function:: includeDirectory(path)
 
   Include configuration files from ``path``.
@@ -290,6 +299,15 @@ Control Socket, Console and Webserver
 Webserver configuration
 ~~~~~~~~~~~~~~~~~~~~~~~
 
+.. function:: hashPassword(password [, workFactor])
+
+  .. versionadded:: 1.7.0
+
+  Hash the supplied password using a random salt, and returns a string that can be used with :func:`setWebserverConfig`.
+
+  :param string - password: The password to hash
+  :param int - workFactor: The work factor to use for the hash function (currently scrypt), as a power of two. Default is 1024.
+
 .. function:: webserver(listen_address [, password[, apikey[, custom_headers[, acl]]]])
 
   .. versionchanged:: 1.5.0
@@ -325,18 +343,23 @@ Webserver configuration
   .. versionchanged:: 1.6.0
     ``statsRequireAuthentication``, ``maxConcurrentConnections`` optional parameters added.
 
+  .. versionchanged:: 1.7.0
+    The optional ``password`` and ``apiKey`` parameters now accept hashed passwords.
+    The optional ``hashPlaintextCredentials`` parameter has been added.
+
   Setup webserver configuration. See :func:`webserver`.
 
   :param table options: A table with key: value pairs with webserver options.
 
   Options:
 
-  * ``password=newPassword``: string - Changes the API password
-  * ``apiKey=newKey``: string - Changes the API Key (set to an empty string do disable it)
+  * ``password=newPassword``: string - Set the password used to access the internal webserver. Since 1.7.0 the password should be hashed and salted via the :func:`hashPassword` command.
+  * ``apiKey=newKey``: string - Changes the API Key (set to an empty string do disable it). Since 1.7.0 the key should be hashed and salted via the :func:`hashPassword` command.
   * ``custom_headers={[str]=str,...}``: map of string - Allows setting custom headers and removing the defaults.
   * ``acl=newACL``: string - List of IP addresses, as a string, that are allowed to open a connection to the web server. Defaults to "127.0.0.1, ::1".
   * ``statsRequireAuthentication``: bool - Whether access to the statistics (/metrics and /jsonstat endpoints) require a valid password or API key. Defaults to true.
   * ``maxConcurrentConnections``: int - The maximum number of concurrent web connections, or 0 which means an unlimited number. Defaults to 100.
+  * ``hashPlaintextCredentials``: bool - Whether passwords and API keys provided in plaintext should be hashed during startup, to prevent the plaintext versions from staying in memory. Doing so increases significantly the cost of verifying credentials. Defaults to false.
 
 .. function:: registerWebHandler(path, handler)
 
@@ -489,7 +512,7 @@ Servers
     Added ``maxInFlight`` to server_table.
 
   .. versionchanged:: 1.7.0
-    Added ``caStore``, ``checkTCP``, ``ciphers``, ``ciphers13``, ``subjectName``, ``tcpOnly``, ``tls`` and ``validateCertificates`` to server_table.
+    Added ``addXForwardedHeaders``, ``caStore``, ``checkTCP``, ``ciphers``, ``ciphers13``, ``dohPath``, ``enableRenegotiation``, ``releaseBuffers``, ``subjectName``, ``tcpOnly``, ``tls`` and ``validateCertificates`` to server_table.
 
   Add a new backend server. Call this function with either a string::
 
@@ -531,7 +554,7 @@ Servers
                                 --   "address@interface", e.g. "192.0.2.2@eth0"
       addXPF=NUM,               -- Add the client's IP address and port to the query, along with the original destination address and port,
                                 -- using the experimental XPF record from `draft-bellis-dnsop-xpf <https://datatracker.ietf.org/doc/draft-bellis-dnsop-xpf/>`_ and the specified option code. Default is disabled (0)
-      sockets=NUM,              -- Number of sockets (and thus source ports) used toward the backend server, defaults to a single one. Note that for backends which are multithreaded, this setting will have an effect on the number of cores that will be used to process traffic from dnsdist. For example you may want to set 'sockets' to a number somewhat higher than the number of worker threads configured in the backend, particularly if the Linux kernel is being used to distribute traffic to multiple threads listening on the same socket (via `reuseport`).
+      sockets=NUM,              -- Number of UDP sockets (and thus source ports) used toward the backend server, defaults to a single one. Note that for backends which are multithreaded, this setting will have an effect on the number of cores that will be used to process traffic from dnsdist. For example you may want to set 'sockets' to a number somewhat higher than the number of worker threads configured in the backend, particularly if the Linux kernel is being used to distribute traffic to multiple threads listening on the same socket (via `reuseport`).
       disableZeroScope=BOOL,    -- Disable the EDNS Client Subnet 'zero scope' feature, which does a cache lookup for an answer valid for all subnets (ECS scope of 0) before adding ECS information to the query and doing the regular lookup. This requires the ``parseECS`` option of the corresponding cache to be set to true
       rise=NUM,                 -- Require NUM consecutive successful checks before declaring the backend up, default: 1
       useProxyProtocol=BOOL,    -- Add a proxy protocol header to the query, passing along the client's IP address and port along with the original destination address and port. Default is disabled.
@@ -539,12 +562,16 @@ Servers
       maxInFlight=NUM,          -- Maximum number of in-flight queries. The default is 0, which disables out-of-order processing. It should only be enabled if the backend does support out-of-order processing. As of 1.6.0, out-of-order processing needs to be enabled on the frontend as well, via :func:`addLocal` and/or :func:`addTLSLocal`. Note that out-of-order is always enabled on DoH frontends.
       tcpOnly=BOOL,             -- Always forward queries to that backend over TCP, never over UDP. Always enabled for TLS backends. Default is false.
       checkTCP=BOOL,            -- Whether to do healthcheck queries over TCP, instead of UDP. Always enabled for DNS over TLS backend. Default is false.
-      tls=STRING,               -- Enable DNS over TLS communications for this backend, using the TLS provider ("openssl" or "gnutls") passed in parameter. Default is an empty string, which means this backend is used for plain UDP and TCP.
+      tls=STRING,               -- Enable DNS over TLS communications for this backend, or DNS over HTTPS if ``dohPath`` is set, using the TLS provider ("openssl" or "gnutls") passed in parameter. Default is an empty string, which means this backend is used for plain UDP and TCP.
       caStore=STRING,           -- Specifies the path to the CA certificate file, in PEM format, to use to check the certificate presented by the backend. Default is an empty string, which means to use the system CA store. Note that this directive is only used if ``validateCertificates`` is set.
       ciphers=STRING,           -- The TLS ciphers to use. The exact format depends on the provider used. When the OpenSSL provider is used, ciphers for TLS 1.3 must be specified via ``ciphersTLS13``.
       ciphersTLS13=STRING,      -- The ciphers to use for TLS 1.3, when the OpenSSL provider is used. When the GnuTLS provider is used, ``ciphers`` applies regardless of the TLS protocol and this setting is not used.
       subjectName=STRING,       -- The subject name passed in the SNI value of the TLS handshake, and against which to validate the certificate presented by the backend. Default is empty.
-      validateCertificates=BOOL -- Whether the certificate presented by the backend should be validated against the CA store (see ``caStore``). Default is true.
+      validateCertificates=BOOL,-- Whether the certificate presented by the backend should be validated against the CA store (see ``caStore``). Default is true.
+      dohPath=STRING,           -- Enable DNS over HTTPS communication for this backend, using POST queries to the HTTP host supplied as ``subjectName`` and the HTTP path supplied in this parameter.
+      addXForwardedHeaders=BOOL,-- Whether to add X-Forwarded-For, X-Forwarded-Port and X-Forwarded-Proto headers to a DNS over HTTPS backend.
+      releaseBuffers=BOOL,      -- Whether OpenSSL should release its I/O buffers when a connection goes idle, saving roughly 35 kB of memory per connection. Default to true.
+      enableRenegotiation=BOOL  -- Whether secure TLS renegotiation should be enabled. Disabled by default since it increases the attack surface and is seldom used for DNS.
     })
 
   :param str server_string: A simple IP:PORT string.
@@ -762,6 +789,9 @@ See :doc:`../guides/cache` for a how to.
     ``cookieHashing`` parameter added.
     ``numberOfShards`` now defaults to 20.
 
+  .. versionchanged:: 1.7.0
+    ``skipOptions`` parameter added.
+
   Creates a new :class:`PacketCache` with the settings specified.
 
   :param int maxEntries: The maximum number of entries in this cache
@@ -779,6 +809,7 @@ See :doc:`../guides/cache` for a how to.
   * ``staleTTL=60``: int - When the backend servers are not reachable, and global configuration ``setStaleCacheEntriesTTL`` is set appropriately, TTL that will be used when a stale cache entry is returned.
   * ``temporaryFailureTTL=60``: int - On a SERVFAIL or REFUSED from the backend, cache for this amount of seconds..
   * ``cookieHashing=false``: bool - Whether EDNS Cookie values will be hashed, resulting in separate entries for different cookies in the packet cache. This is required if the backend is sending answers with EDNS Cookies, otherwise a client might receive an answer with the wrong cookie.
+  * ``skipOptions={}``: Extra list of EDNS option codes to skip when hashing the packet (if ``cookieHashing`` above is false, EDNS cookie option number will already be added to this list).
 
 .. class:: PacketCache
 
@@ -1236,6 +1267,21 @@ faster than the existing rules.
 
   Represents a group of dynamic block rules.
 
+  .. method:: DynBlockRulesGroup:setMasks(v4, v6, port)
+
+    .. versionadded:: 1.7.0
+
+    Set the number of bits to keep in the IP address when inserting a block. The default is 32 for IPv4 and 128 for IPv6, meaning
+    that only the exact address is blocked, but in some scenarios it might make sense to block a whole /64 IPv6 range instead of a
+    single address, for example.
+    It is also possible to take the IPv4 UDP and TCP ports into account, for CGNAT deployments, by setting the number of bits of the port
+    to consider. For example passing 2 as the last parameter, which only makes sense if the previous parameters are respectively 32
+    and 128, will split a given IP address into four port ranges: 0-16383, 16384-32767, 32768-49151 and 49152-65535.
+
+    :param int v4: Number of bits to keep for IPv4 addresses. Default is 32
+    :param int v6: Number of bits to keep for IPv6 addresses. Default is 128
+    :param int port: Number of bits of port to consider over IPv4. Default is 0 meaning that the port is not taken into account
+
   .. method:: DynBlockRulesGroup:setQueryRate(rate, seconds, reason, blockingTime [, action [, warningRate]])
 
     Adds a query rate-limiting rule, equivalent to:
@@ -1313,9 +1359,12 @@ faster than the existing rules.
 
     .. versionadded:: 1.4.0
 
+    .. versionchanged:: 1.7.0
+      This visitor function can now optionally return an additional string which will be set as the ``reason`` for the dynamic block.
+
     Set a Lua visitor function that will be called for each label of every domain seen in queries and responses. The function receives a `StatNode` object representing the stats of the parent, a second one with the stats of the current label and one with the stats of the current node plus all its children.
     Note that this function will not be called if a FFI version has been set using :meth:`DynBlockRulesGroup:setSuffixMatchRuleFFI`
-    If the function returns true, the current label will be blocked according to the `seconds`, `reason`, `blockingTime` and `action` parameters.
+    If the function returns true, the current label will be blocked according to the `seconds`, `reason`, `blockingTime` and `action` parameters. Since 1.7.0, the function can return an additional string, in addition to the boolean, which will be set as the ``reason`` for the dynamic block.
     Selected domains can be excluded from this processing using the :meth:`DynBlockRulesGroup:excludeDomains` method.
 
     This replaces the existing :func:`addDynBlockSMT` function.
@@ -1560,7 +1609,7 @@ DOHFrontend
 
   .. method:: DOHFrontend:loadNewCertificatesAndKeys(certFile(s), keyFile(s))
 
-     .. versionadded:: 1.7.0
+     .. versionadded:: 1.6.1
 
      Create and switch to a new TLS context using the same options than were passed to the corresponding `addDOHLocal()` directive, but loading new certificates and keys from the selected files, replacing the existing ones.
 

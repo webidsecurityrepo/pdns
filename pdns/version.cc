@@ -135,6 +135,15 @@ void showBuildConfiguration()
 #ifdef HAVE_LIBSODIUM
     "sodium " <<
 #endif
+#ifdef HAVE_LIBCURL
+    "curl " <<
+#endif
+#ifdef HAVE_DNS_OVER_TLS
+    "DoT " <<
+#endif
+#ifdef HAVE_EVP_PKEY_CTX_SET1_SCRYPT_SALT
+    "scrypt " <<
+#endif
 #ifdef VERBOSELOG
     "verboselog" <<
 #endif

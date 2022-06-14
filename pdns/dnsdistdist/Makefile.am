@@ -5,6 +5,7 @@ AM_CPPFLAGS += $(SYSTEMD_CFLAGS) \
 	$(FSTRM_CFLAGS) \
 	$(YAHTTP_CFLAGS) \
 	$(NET_SNMP_CFLAGS) \
+	$(NGHTTP2_CFLAGS) \
 	$(LIBCAP_CFLAGS) \
 	-I$(top_srcdir)/ext/protozero/include \
 	-DSYSCONFDIR=\"${sysconfdir}\" \
@@ -129,6 +130,7 @@ dnsdist_SOURCES = \
 	capabilities.cc capabilities.hh \
 	circular_buffer.hh \
 	connection-management.hh \
+	credentials.cc credentials.hh \
 	dns.cc dns.hh \
 	dnscrypt.cc dnscrypt.hh \
 	dnsdist-backend.cc \
@@ -158,6 +160,7 @@ dnsdist_SOURCES = \
 	dnsdist-lua-vars.cc \
 	dnsdist-lua-web.cc \
 	dnsdist-lua.cc dnsdist-lua.hh \
+	dnsdist-nghttp2.cc dnsdist-nghttp2.hh \
 	dnsdist-prometheus.hh \
 	dnsdist-protobuf.cc dnsdist-protobuf.hh \
 	dnsdist-protocols.cc dnsdist-protocols.hh \
@@ -167,6 +170,7 @@ dnsdist_SOURCES = \
 	dnsdist-secpoll.cc dnsdist-secpoll.hh \
 	dnsdist-session-cache.cc dnsdist-session-cache.hh \
 	dnsdist-snmp.cc dnsdist-snmp.hh \
+	dnsdist-svc.cc dnsdist-svc.hh \
 	dnsdist-systemd.cc dnsdist-systemd.hh \
 	dnsdist-tcp-downstream.cc dnsdist-tcp-downstream.hh \
 	dnsdist-tcp-upstream.hh \
@@ -224,6 +228,7 @@ testrunner_SOURCES = \
 	cachecleaner.hh \
 	circular_buffer.hh \
 	connection-management.hh \
+	credentials.cc credentials.hh \
 	dns.cc dns.hh \
 	dnscrypt.cc dnscrypt.hh \
 	dnsdist-backend.cc \
@@ -240,11 +245,13 @@ testrunner_SOURCES = \
 	dnsdist-lua-ffi-interface.h dnsdist-lua-ffi-interface.inc \
 	dnsdist-lua-ffi.cc dnsdist-lua-ffi.hh \
 	dnsdist-lua-vars.cc \
+	dnsdist-nghttp2.cc dnsdist-nghttp2.hh \
 	dnsdist-protocols.cc dnsdist-protocols.hh \
 	dnsdist-proxy-protocol.cc dnsdist-proxy-protocol.hh \
 	dnsdist-rings.cc dnsdist-rings.hh \
 	dnsdist-rules.cc dnsdist-rules.hh \
 	dnsdist-session-cache.cc dnsdist-session-cache.hh \
+	dnsdist-svc.cc dnsdist-svc.hh \
 	dnsdist-tcp-downstream.cc \
 	dnsdist-tcp.cc dnsdist-tcp.hh \
 	dnsdist-xpf.cc dnsdist-xpf.hh \
@@ -275,15 +282,19 @@ testrunner_SOURCES = \
 	svc-records.cc svc-records.hh \
 	test-base64_cc.cc \
 	test-connectionmanagement_hh.cc \
+	test-credentials_cc.cc \
 	test-delaypipe_hh.cc \
 	test-dnscrypt_cc.cc \
+	test-dnsdist-connections-cache.cc \
 	test-dnsdist_cc.cc \
 	test-dnsdistdynblocks_hh.cc \
 	test-dnsdistkvs_cc.cc \
 	test-dnsdistlbpolicies_cc.cc \
+	test-dnsdistnghttp2_cc.cc \
 	test-dnsdistpacketcache_cc.cc \
 	test-dnsdistrings_cc.cc \
 	test-dnsdistrules_cc.cc \
+	test-dnsdistsvc_cc.cc \
 	test-dnsdisttcp_cc.cc \
 	test-dnsparser_cc.cc \
 	test-iputils_hh.cc \
@@ -343,6 +354,7 @@ endif
 
 if HAVE_LIBCRYPTO
 dnsdist_LDADD += $(LIBCRYPTO_LDFLAGS) $(LIBCRYPTO_LIBS)
+testrunner_LDADD += $(LIBCRYPTO_LDFLAGS) $(LIBCRYPTO_LIBS)
 dnsdist_SOURCES += ipcipher.cc ipcipher.hh
 endif
 
@@ -365,6 +377,11 @@ if HAVE_LIBH2OEVLOOP
 dnsdist_LDADD += $(LIBH2OEVLOOP_LIBS)
 endif
 
+endif
+
+if HAVE_NGHTTP2
+dnsdist_LDADD += $(NGHTTP2_LDFLAGS) $(NGHTTP2_LIBS)
+testrunner_LDADD += $(NGHTTP2_LDFLAGS) $(NGHTTP2_LIBS)
 endif
 
 if !HAVE_LUA_HPP
@@ -507,6 +524,7 @@ endif
 dnsdist@.service: dnsdist.service
 	$(AM_V_GEN)sed -e 's!/dnsdist !&--config $(sysconfdir)/dnsdist-%i.conf !' \
 	  -e 's!RuntimeDirectory=.*!&-%i!' \
+	  -e 's!SyslogIdentifier=.*!&-%i!' \
 	  < $< >$@
 
 systemdsystemunitdir = $(SYSTEMD_DIR)

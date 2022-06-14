@@ -238,7 +238,8 @@ counts the number of queries to locally hosted authoritative zones (:ref:`settin
 
 cache-bytes
 ^^^^^^^^^^^
-size of the cache in bytes
+size of the cache in bytes (disabled by default, see :ref:`setting-stats-rec-control-disabled-list`)
+This metric is a rough estimate and takes a long time to compute, and is therefore not enabled in default outputs.
 
 cache-entries
 ^^^^^^^^^^^^^
@@ -284,28 +285,22 @@ cpu-steal
 
 Stolen time, which is the time spent by the whole system in other operating systems when running in a virtualized environment, in units of USER_HZ.
 
-cumul-answers-x
-^^^^^^^^^^^^^^^^^^
+
+cumul-authanswers-x
+^^^^^^^^^^^^^^^^^^^^^
 .. versionadded:: 4.6
 
-Cumulative counts of answer times in buckets less or equal than x microseconds.
+Cumulative counts of answer times of authoritative servers in buckets less than x microseconds.
+(disabled by default, see :ref:`setting-stats-rec-control-disabled-list`)
+These metrics are useful for Prometheus and not listed in other outputs by default.
+
+cumul-clientanswers-x
+^^^^^^^^^^^^^^^^^^^^^
+.. versionadded:: 4.6
+
+Cumulative counts of our answer times to clients in buckets less or equal than x microseconds.
 These metrics include packet cache hits.
-These metrics are useful for Prometheus and not listed other outputs by default.
-
-
-cumul-auth4-answers-x
-^^^^^^^^^^^^^^^^^^^^^
-.. versionadded:: 4.6
-
-Cumulative counts of answer times of authoritative servers over IPv4 in buckets less than x microseconds.
-These metrics are useful for Prometheus and not listed other outputs by default.
-
-cumul-auth6-answers-x
-^^^^^^^^^^^^^^^^^^^^^
-.. versionadded:: 4.6
-
-Cumulative counts of answer times of authoritative servers over IPv6 in buckets less than x microseconds.
-These metrics are useful for Prometheus and not listed other outputs by default.
+These metrics are useful for Prometheus and not listed in other outputs by default.
 
 dns64-prefix-answers
 ^^^^^^^^^^^^^^^^^^^^
@@ -475,12 +470,14 @@ ecs-v4-response-bits-*
 .. versionadded:: 4.2.0
 
 number of responses received from authoritative servers with an IPv4 EDNS Client Subnet option we used, of this subnet size (1 to 32).
+(disabled by default, see :ref:`setting-stats-rec-control-disabled-list`)
 
 ecs-v6-response-bits-*
 ^^^^^^^^^^^^^^^^^^^^^^
 .. versionadded:: 4.2.0
 
 number of responses received from authoritative servers with an IPv6 EDNS Client Subnet option we used, of this subnet size (1 to 128).
+(disabled by default, see :ref:`setting-stats-rec-control-disabled-list`)
 
 edns-ping-matches
 ^^^^^^^^^^^^^^^^^
@@ -493,6 +490,13 @@ number of servers that sent an invalid EDNS   PING response
 failed-host-entries
 ^^^^^^^^^^^^^^^^^^^
 number of servers that failed to resolve
+
+.. _stat-fd-usage:
+
+fd-usage
+^^^^^^^^
+Number of currently used file descriptors.
+Currently, this metric is available on Linux and OpenBSD only.
 
 ignored-packets
 ^^^^^^^^^^^^^^^
@@ -576,7 +580,8 @@ questions dropped because over maximum   concurrent query limit (since 3.2)
 
 packetcache-bytes
 ^^^^^^^^^^^^^^^^^
-size of the packet cache in bytes (since   3.3.1)
+size of the packet cache in bytes (since 3.3.1) (disabled by default, see :ref:`setting-stats-rec-control-disabled-list`)
+This metric is a rough estimate and takes a long time to compute, and is therefore not enabled in default outputs.
 
 packetcache-entries
 ^^^^^^^^^^^^^^^^^^^
@@ -663,7 +668,10 @@ number of contended record cache lock acquisitions
 
 resource-limits
 ^^^^^^^^^^^^^^^
-counts number of queries that could not be   performed because of resource limits
+Counts the number of queries that could not be performed because of resource limits. 
+This counter is increased when Recursor encounters a network issue that does not seem to be caused by the remote end. 
+For example when it runs out of file descriptors (monitor :ref:`stat-fd-usage`) or when there is no route to a
+given IP address.
 
 security-status
 ^^^^^^^^^^^^^^^
@@ -754,6 +762,14 @@ number of TCP questions denied because of   allow-from restrictions
 unauthorized-udp
 ^^^^^^^^^^^^^^^^
 number of UDP questions denied because of   allow-from restrictions
+
+source-disallowed-notify
+^^^^^^^^^^^^^^^^^^^^^^^^
+number of NOTIFY operations denied because of allow-notify-from restrictions
+
+zone-disallowed-notify
+^^^^^^^^^^^^^^^^^^^^^^
+number of NOTIFY operations denied because of allow-notify-for restrictions
 
 unexpected-packets
 ^^^^^^^^^^^^^^^^^^

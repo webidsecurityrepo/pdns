@@ -4,8 +4,10 @@ from datetime import datetime, timedelta
 import os
 import string
 import time
+import unittest
 import dns
 import clientsubnetoption
+import cookiesoption
 from dnsdisttests import DNSDistTest
 
 class TestAdvancedAllow(DNSDistTest):
@@ -162,7 +164,6 @@ class TestAdvancedAddCD(DNSDistTest):
 
     _config_template = """
     addAction("setcd.advanced.tests.powerdns.com.", SetDisableValidationAction())
-    addAction(makeRule("setcdviaaction.advanced.tests.powerdns.com."), SetDisableValidationAction())
     newServer{address="127.0.0.1:%s"}
     """
 
@@ -174,35 +175,6 @@ class TestAdvancedAddCD(DNSDistTest):
         check that dnsdist set the CD flag.
         """
         name = 'setcd.advanced.tests.powerdns.com.'
-        query = dns.message.make_query(name, 'A', 'IN')
-        expectedQuery = dns.message.make_query(name, 'A', 'IN')
-        expectedQuery.flags |= dns.flags.CD
-
-        response = dns.message.make_response(query)
-        rrset = dns.rrset.from_text(name,
-                                    3600,
-                                    dns.rdataclass.IN,
-                                    dns.rdatatype.A,
-                                    '127.0.0.1')
-        response.answer.append(rrset)
-
-        for method in ("sendUDPQuery", "sendTCPQuery"):
-            sender = getattr(self, method)
-            (receivedQuery, receivedResponse) = sender(query, response)
-            self.assertTrue(receivedQuery)
-            self.assertTrue(receivedResponse)
-            receivedQuery.id = expectedQuery.id
-            self.assertEqual(expectedQuery, receivedQuery)
-            self.assertEqual(response, receivedResponse)
-
-    def testAdvancedSetCDViaAction(self):
-        """
-        Advanced: Set CD via Action
-
-        Send a query with CD cleared,
-        check that dnsdist set the CD flag.
-        """
-        name = 'setcdviaaction.advanced.tests.powerdns.com.'
         query = dns.message.make_query(name, 'A', 'IN')
         expectedQuery = dns.message.make_query(name, 'A', 'IN')
         expectedQuery.flags |= dns.flags.CD
@@ -255,7 +227,6 @@ class TestAdvancedClearRD(DNSDistTest):
 
     _config_template = """
     addAction("clearrd.advanced.tests.powerdns.com.", SetNoRecurseAction())
-    addAction(makeRule("clearrdviaaction.advanced.tests.powerdns.com."), SetNoRecurseAction())
     newServer{address="127.0.0.1:%s"}
     """
 
@@ -267,35 +238,6 @@ class TestAdvancedClearRD(DNSDistTest):
         check that dnsdist clears the RD flag.
         """
         name = 'clearrd.advanced.tests.powerdns.com.'
-        query = dns.message.make_query(name, 'A', 'IN')
-        expectedQuery = dns.message.make_query(name, 'A', 'IN')
-        expectedQuery.flags &= ~dns.flags.RD
-
-        response = dns.message.make_response(query)
-        rrset = dns.rrset.from_text(name,
-                                    3600,
-                                    dns.rdataclass.IN,
-                                    dns.rdatatype.A,
-                                    '127.0.0.1')
-        response.answer.append(rrset)
-
-        for method in ("sendUDPQuery", "sendTCPQuery"):
-            sender = getattr(self, method)
-            (receivedQuery, receivedResponse) = sender(query, response)
-            self.assertTrue(receivedQuery)
-            self.assertTrue(receivedResponse)
-            receivedQuery.id = expectedQuery.id
-            self.assertEqual(expectedQuery, receivedQuery)
-            self.assertEqual(response, receivedResponse)
-
-    def testAdvancedClearRDViaAction(self):
-        """
-        Advanced: Clear RD via Action
-
-        Send a query with RD set,
-        check that dnsdist clears the RD flag.
-        """
-        name = 'clearrdviaaction.advanced.tests.powerdns.com.'
         query = dns.message.make_query(name, 'A', 'IN')
         expectedQuery = dns.message.make_query(name, 'A', 'IN')
         expectedQuery.flags &= ~dns.flags.RD
@@ -408,49 +350,6 @@ class TestAdvancedDelay(DNSDistTest):
         self.assertEqual(query, receivedQuery)
         self.assertEqual(response, receivedResponse)
         self.assertTrue((end - begin) < timedelta(0, 1))
-
-
-class TestAdvancedTruncateAnyAndTCP(DNSDistTest):
-
-    _config_template = """
-    truncateTC(false)
-    addAction(AndRule({QTypeRule("ANY"), TCPRule(true)}), TCAction())
-    newServer{address="127.0.0.1:%s"}
-    """
-    def testTruncateAnyOverTCP(self):
-        """
-        Advanced: Truncate ANY over TCP
-
-        Send an ANY query to "anytruncatetcp.advanced.tests.powerdns.com.",
-        should be truncated over TCP, not over UDP (yes, it makes no sense,
-        deal with it).
-        """
-        name = 'anytruncatetcp.advanced.tests.powerdns.com.'
-        query = dns.message.make_query(name, 'ANY', 'IN')
-        # dnsdist sets RA = RD for TC responses
-        query.flags &= ~dns.flags.RD
-
-        response = dns.message.make_response(query)
-        rrset = dns.rrset.from_text(name,
-                                    3600,
-                                    dns.rdataclass.IN,
-                                    dns.rdatatype.A,
-                                    '127.0.0.1')
-
-        response.answer.append(rrset)
-
-        (receivedQuery, receivedResponse) = self.sendUDPQuery(query, response)
-        self.assertTrue(receivedQuery)
-        self.assertTrue(receivedResponse)
-        receivedQuery.id = query.id
-        self.assertEqual(query, receivedQuery)
-        self.assertEqual(receivedResponse, response)
-
-        expectedResponse = dns.message.make_response(query)
-        expectedResponse.flags |= dns.flags.TC
-
-        (_, receivedResponse) = self.sendTCPQuery(query, response=None, useQueue=False)
-        self.assertEqual(receivedResponse, expectedResponse)
 
 class TestAdvancedAndNot(DNSDistTest):
 
@@ -1078,6 +977,7 @@ class TestAdvancedWireLengthRule(DNSDistTest):
             (_, receivedResponse) = sender(query, response=None, useQueue=False)
             self.assertEqual(receivedResponse, expectedResponse)
 
+@unittest.skipIf('SKIP_INCLUDEDIR_TESTS' in os.environ, 'IncludeDir tests are disabled')
 class TestAdvancedIncludeDir(DNSDistTest):
 
     _config_template = """
@@ -2344,3 +2244,67 @@ class TestProtocols(DNSDistTest):
         receivedQuery.id = query.id
         self.assertEqual(receivedQuery, query)
         self.assertEqual(receivedResponse, response)
+
+class TestAdvancedSetEDNSOptionAction(DNSDistTest):
+
+    _config_template = """
+    addAction(AllRule(), SetEDNSOptionAction(10, "deadbeefdeadc0de"))
+    newServer{address="127.0.0.1:%s"}
+    """
+
+    def testAdvancedSetEDNSOption(self):
+        """
+        Advanced: Set EDNS Option
+        """
+        name = 'setednsoption.advanced.tests.powerdns.com.'
+        query = dns.message.make_query(name, 'A', 'IN')
+
+        eco = cookiesoption.CookiesOption(b'deadbeef', b'deadc0de')
+        expectedQuery = dns.message.make_query(name, 'A', 'IN', use_edns=True, payload=512, options=[eco])
+
+        response = dns.message.make_response(query)
+        rrset = dns.rrset.from_text(name,
+                                    3600,
+                                    dns.rdataclass.IN,
+                                    dns.rdatatype.A,
+                                    '127.0.0.1')
+        response.answer.append(rrset)
+
+        for method in ("sendUDPQuery", "sendTCPQuery"):
+            sender = getattr(self, method)
+            (receivedQuery, receivedResponse) = sender(query, response)
+            self.assertTrue(receivedQuery)
+            self.assertTrue(receivedResponse)
+            receivedQuery.id = expectedQuery.id
+            self.assertEqual(expectedQuery, receivedQuery)
+            self.checkResponseNoEDNS(response, receivedResponse)
+            self.checkQueryEDNS(expectedQuery, receivedQuery)
+
+    def testAdvancedSetEDNSOptionOverwrite(self):
+        """
+        Advanced: Set EDNS Option overwrites an existing option
+        """
+        name = 'setednsoption-overwrite.advanced.tests.powerdns.com.'
+        initialECO = cookiesoption.CookiesOption(b'aaaaaaaa', b'bbbbbbbb')
+        query = dns.message.make_query(name, 'A', 'IN')
+
+        overWrittenECO = cookiesoption.CookiesOption(b'deadbeef', b'deadc0de')
+        expectedQuery = dns.message.make_query(name, 'A', 'IN', use_edns=True, payload=512, options=[overWrittenECO])
+
+        response = dns.message.make_response(query)
+        rrset = dns.rrset.from_text(name,
+                                    3600,
+                                    dns.rdataclass.IN,
+                                    dns.rdatatype.A,
+                                    '127.0.0.1')
+        response.answer.append(rrset)
+
+        for method in ("sendUDPQuery", "sendTCPQuery"):
+            sender = getattr(self, method)
+            (receivedQuery, receivedResponse) = sender(query, response)
+            self.assertTrue(receivedQuery)
+            self.assertTrue(receivedResponse)
+            receivedQuery.id = expectedQuery.id
+            self.assertEqual(expectedQuery, receivedQuery)
+            self.checkResponseNoEDNS(response, receivedResponse)
+            self.checkQueryEDNS(expectedQuery, receivedQuery)
