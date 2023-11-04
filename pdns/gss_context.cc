@@ -25,25 +25,25 @@
 
 #ifndef ENABLE_GSS_TSIG
 
-std::tuple<size_t, size_t, size_t> GssContext::getCounts() { return std::make_tuple<size_t, size_t, size_t>(0, 0, 0); }
+std::tuple<size_t, size_t, size_t> GssContext::getCounts() { return std::tuple<size_t, size_t, size_t>(0, 0, 0); }
 bool GssContext::supported() { return false; }
 GssContext::GssContext() :
   d_error(GSS_CONTEXT_UNSUPPORTED), d_type(GSS_CONTEXT_NONE) {}
-GssContext::GssContext(const DNSName& label) :
+GssContext::GssContext(const DNSName& /* label */) :
   d_error(GSS_CONTEXT_UNSUPPORTED), d_type(GSS_CONTEXT_NONE) {}
-void GssContext::setLocalPrincipal(const std::string& name) {}
-bool GssContext::getLocalPrincipal(std::string& name) { return false; }
-void GssContext::setPeerPrincipal(const std::string& name) {}
-bool GssContext::getPeerPrincipal(std::string& name) { return false; }
-void GssContext::generateLabel(const std::string& suffix) {}
-void GssContext::setLabel(const DNSName& label) {}
-bool GssContext::init(const std::string& input, std::string& output) { return false; }
-bool GssContext::accept(const std::string& input, std::string& output) { return false; }
+void GssContext::setLocalPrincipal(const std::string& /* name */) {}
+bool GssContext::getLocalPrincipal(std::string& /* name */) { return false; }
+void GssContext::setPeerPrincipal(const std::string& /* name */) {}
+bool GssContext::getPeerPrincipal(std::string& /* name */) { return false; }
+void GssContext::generateLabel(const std::string& /* suffix */) {}
+void GssContext::setLabel(const DNSName& /* label */) {}
+bool GssContext::init(const std::string& /* input */, std::string& /* output */) { return false; }
+bool GssContext::accept(const std::string& /* input */, std::string& /* output */) { return false; }
 bool GssContext::destroy() { return false; }
 bool GssContext::expired() { return false; }
 bool GssContext::valid() { return false; }
-bool GssContext::sign(const std::string& input, std::string& output) { return false; }
-bool GssContext::verify(const std::string& input, const std::string& signature) { return false; }
+bool GssContext::sign(const std::string& /* input */, std::string& /* output */) { return false; }
+bool GssContext::verify(const std::string& /* input */, const std::string& /* signature */) { return false; }
 GssContextError GssContext::getError() { return GSS_CONTEXT_UNSUPPORTED; }
 
 #else
@@ -490,7 +490,7 @@ bool GssContext::getPeerPrincipal(std::string& name)
 
 std::tuple<size_t, size_t, size_t> GssContext::getCounts()
 {
-  return std::make_tuple(s_gss_init_creds.lock()->size(), s_gss_accept_creds.lock()->size(), s_gss_sec_context.lock()->size());
+  return {s_gss_init_creds.lock()->size(), s_gss_accept_creds.lock()->size(), s_gss_sec_context.lock()->size()};
 }
 
 void GssContext::processError(const std::string& method, OM_uint32 maj, OM_uint32 min)

@@ -212,10 +212,10 @@ public:
 
   struct KeyData {
     std::string content;
-    unsigned int id;
-    unsigned int flags;
-    bool active;
-    bool published;
+    unsigned int id{0};
+    unsigned int flags{0};
+    bool active{false};
+    bool published{false};
   };
 
   virtual bool getDomainKeys(const DNSName& /* name */, std::vector<KeyData>& /* keys */) { return false; }
@@ -268,8 +268,9 @@ public:
     return false;
   }
 
-  virtual void feedComment(const Comment& /* comment */)
+  virtual bool feedComment(const Comment& /* comment */)
   {
+    return false;
   }
 
   virtual bool replaceComments(const uint32_t /* domain_id */, const DNSName& /* qname */, const QType& /* qt */, const vector<Comment>& /* comments */)

@@ -22,7 +22,8 @@
 #pragma once
 
 #include <cstdint>
-#include <time.h>
+#include <ctime>
+#include <qtype.hh>
 
 class DNSName;
 union ComboAddress;
@@ -35,8 +36,8 @@ struct ResolveTask;
 void runTasks(size_t max, bool logErrors);
 bool runTaskOnce(bool logErrors);
 void pushAlmostExpiredTask(const DNSName& qname, uint16_t qtype, time_t deadline, const Netmask& netmask);
-void pushResolveTask(const DNSName& qname, uint16_t qtype, time_t now, time_t deadline);
-bool pushTryDoTTask(const DNSName& qname, uint16_t qtype, const ComboAddress& ip, time_t deadline, const DNSName& nsname);
+void pushResolveTask(const DNSName& qname, uint16_t qtype, time_t now, time_t deadline, bool forceQMOff);
+bool pushTryDoTTask(const DNSName& qname, uint16_t qtype, const ComboAddress& ipAddress, time_t deadline, const DNSName& nsname);
 void taskQueueClear();
 pdns::ResolveTask taskQueuePop();
 
@@ -54,3 +55,5 @@ uint64_t getResolveTaskExceptions();
 uint64_t getAlmostExpiredTasksPushed();
 uint64_t getAlmostExpiredTasksRun();
 uint64_t getAlmostExpiredTaskExceptions();
+
+bool taskQTypeIsSupported(QType qtype);

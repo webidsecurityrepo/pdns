@@ -175,7 +175,7 @@ struct QuestionData
   int d_assignedID;
   MOADNSParser::answers_t d_origAnswers, d_newAnswers;
   int d_origRcode, d_newRcode;
-  struct timeval d_resentTime;
+  struct timeval d_resentTime{};
   bool d_norecursionavailable;
   bool d_origlate, d_newlate;
 };
@@ -306,9 +306,9 @@ static void emitFlightTimes()
   cout.precision(2);
   for(unsigned int i =0 ; i < sizeof(limits)/sizeof(limits[0]); ++i) {
     if(limits[i]!=flightTimes.size())
-      cout<<"Within "<<limits[i]<<" msec: ";
+      cout<<"Within "<<limits[i]<<" ms: ";
     else
-      cout<<"Beyond "<<limits[i]-2<<" msec: ";
+      cout<<"Beyond "<<limits[i]-2<<" ms: ";
     uint64_t here = countLessThan(limits[i]);
     cout<<100.0*here/totals<<"% ("<<100.0*(here-sofar)/totals<<"%)"<<endl;
     sofar=here;
@@ -595,7 +595,7 @@ static bool checkIPTransparentUsability()
 static bool g_rdSelector;
 static uint16_t g_pcapDnsPort;
 
-static bool sendPacketFromPR(PcapPacketReader& pr, const ComboAddress& remote, int stamp, bool usePCAPSourceIP)
+static bool sendPacketFromPR(PcapPacketReader& pr, const ComboAddress& remote, int stamp, [[maybe_unused]] bool usePCAPSourceIP)
 {
   bool sent=false;
   if (pr.d_len <= sizeof(dnsheader)) {

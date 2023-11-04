@@ -90,7 +90,7 @@ void setupLuaBindings(LuaContext& luaCtx, bool client)
   /* ServerPool */
   luaCtx.registerFunction<void(std::shared_ptr<ServerPool>::*)(std::shared_ptr<DNSDistPacketCache>)>("setCache", [](std::shared_ptr<ServerPool> pool, std::shared_ptr<DNSDistPacketCache> cache) {
       if (pool) {
-        pool->packetCache = cache;
+        pool->packetCache = std::move(cache);
       }
     });
   luaCtx.registerFunction("getCache", &ServerPool::getCache);
@@ -192,8 +192,12 @@ void setupLuaBindings(LuaContext& luaCtx, bool client)
       return (bool)dh.cd;
     });
 
-    luaCtx.registerFunction<uint16_t(dnsheader::*)()const>("getID", [](const dnsheader& dh) {
+  luaCtx.registerFunction<uint16_t(dnsheader::*)()const>("getID", [](const dnsheader& dh) {
       return ntohs(dh.id);
+    });
+
+  luaCtx.registerFunction<bool(dnsheader::*)()const>("getTC", [](const dnsheader& dh) {
+      return (bool)dh.tc;
     });
 
   luaCtx.registerFunction<void(dnsheader::*)(bool)>("setTC", [](dnsheader& dh, bool v) {

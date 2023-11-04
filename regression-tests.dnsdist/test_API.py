@@ -6,12 +6,12 @@ import json
 import requests
 import socket
 import time
-from dnsdisttests import DNSDistTest
+from dnsdisttests import DNSDistTest, pickAvailablePort
 
 class APITestsBase(DNSDistTest):
     __test__ = False
-    _webTimeout = 2.0
-    _webServerPort = 8083
+    _webTimeout = 5.0
+    _webServerPort = pickAvailablePort()
     _webServerBasicAuthPassword = 'secret'
     _webServerBasicAuthPasswordHashed = '$scrypt$ln=10,p=1,r=8$6DKLnvUYEeXWh3JNOd3iwg==$kSrhdHaRbZ7R74q3lGBqO1xetgxRxhmWzYJ2Qvfm7JM='
     _webServerAPIKey = 'apisecret'
@@ -38,9 +38,18 @@ class APITestsBase(DNSDistTest):
                         'dyn-block-nmg-size', 'rule-servfail', 'rule-truncated', 'security-status',
                         'udp-in-csum-errors', 'udp-in-errors', 'udp-noport-errors', 'udp-recvbuf-errors', 'udp-sndbuf-errors',
                         'udp6-in-errors', 'udp6-recvbuf-errors', 'udp6-sndbuf-errors', 'udp6-noport-errors', 'udp6-in-csum-errors',
-                        'doh-query-pipe-full', 'doh-response-pipe-full', 'proxy-protocol-invalid', 'tcp-listen-overflows',
+                        'doh-query-pipe-full', 'doh-response-pipe-full', 'doq-response-pipe-full', 'proxy-protocol-invalid', 'tcp-listen-overflows',
                         'outgoing-doh-query-pipe-full', 'tcp-query-pipe-full', 'tcp-cross-protocol-query-pipe-full',
                         'tcp-cross-protocol-response-pipe-full']
+    _verboseMode = True
+
+    @classmethod
+    def setUpClass(cls):
+        cls.startResponders()
+        cls.startDNSDist()
+        cls.setUpSockets()
+        cls.waitForTCPSocket('127.0.0.1', cls._webServerPort)
+        print("Launching tests..")
 
 class TestAPIBasics(APITestsBase):
 
@@ -135,7 +144,7 @@ class TestAPIBasics(APITestsBase):
                         'dropRate', 'responses', 'nonCompliantResponses', 'tcpDiedSendingQuery', 'tcpDiedReadingResponse',
                         'tcpGaveUp', 'tcpReadTimeouts', 'tcpWriteTimeouts', 'tcpCurrentConnections',
                         'tcpNewConnections', 'tcpReusedConnections', 'tlsResumptions', 'tcpAvgQueriesPerConnection',
-                        'tcpAvgConnectionDuration', 'tcpLatency', 'protocol']:
+                        'tcpAvgConnectionDuration', 'tcpLatency', 'protocol', 'healthCheckFailures', 'healthCheckFailuresParsing', 'healthCheckFailuresTimeout', 'healthCheckFailuresNetwork', 'healthCheckFailuresMismatch', 'healthCheckFailuresInvalid']:
                 self.assertIn(key, server)
 
             for key in ['id', 'latency', 'weight', 'outstanding', 'qpsLimit', 'reuseds',
@@ -767,6 +776,14 @@ class TestWebConcurrentConnections(APITestsBase):
     webserver("127.0.0.1:%s")
     setWebserverConfig({password="%s", apiKey="%s", maxConcurrentConnections=%d})
     """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.startResponders()
+        cls.startDNSDist()
+        cls.setUpSockets()
+        # do no check if the web server socket is up, because this
+        # might mess up the concurrent connections counter
 
     def testConcurrentConnections(self):
         """

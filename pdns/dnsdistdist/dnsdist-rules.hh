@@ -33,6 +33,7 @@
 #include "dnsdist-lua-ffi.hh"
 #include "dolog.hh"
 #include "dnsparser.hh"
+#include "dns_random.hh"
 
 class MaxQPSIPRule : public DNSRule
 {
@@ -556,7 +557,7 @@ private:
 class HTTPPathRule : public DNSRule
 {
 public:
-  HTTPPathRule(const std::string& path);
+  HTTPPathRule(std::string path);
   bool matches(const DNSQuestion* dq) const override;
   string toString() const override;
 private:
@@ -1055,7 +1056,7 @@ public:
   {
     if(d_proba == 1.0)
       return true;
-    double rnd = 1.0*random() / RAND_MAX;
+    double rnd = 1.0*dns_random_uint32() / UINT32_MAX;
     return rnd > (1.0 - d_proba);
   }
   string toString() const override
@@ -1069,7 +1070,7 @@ private:
 class TagRule : public DNSRule
 {
 public:
-  TagRule(const std::string& tag, boost::optional<std::string> value) : d_value(value), d_tag(tag)
+  TagRule(const std::string& tag, boost::optional<std::string> value) : d_value(std::move(value)), d_tag(tag)
   {
   }
   bool matches(const DNSQuestion* dq) const override
@@ -1318,7 +1319,7 @@ private:
 class ProxyProtocolValueRule : public DNSRule
 {
 public:
-  ProxyProtocolValueRule(uint8_t type, boost::optional<std::string> value): d_value(value), d_type(type)
+  ProxyProtocolValueRule(uint8_t type, boost::optional<std::string> value): d_value(std::move(value)), d_type(type)
   {
   }
 

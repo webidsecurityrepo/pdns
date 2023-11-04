@@ -134,7 +134,7 @@ Tuning related functions
   See also :func:`setRandomizedOutgoingSockets`.
   The default is to use a linearly increasing counter from 0 to 65535, wrapping back to 0 when necessary.
 
-.. function:: setRandomizedOutgoingSockets(val):
+.. function:: setRandomizedOutgoingSockets(val)
 
   .. versionadded:: 1.8.0
 
@@ -163,13 +163,13 @@ Tuning related functions
 
 .. function:: setTCPRecvTimeout(num)
 
-  Set the read timeout on TCP connections from the client, in seconds
+  Set the read timeout on TCP connections from the client, in seconds. Defaults to 2
 
   :param int num:
 
 .. function:: setTCPSendTimeout(num)
 
-  Set the write timeout on TCP connections from the client, in seconds
+  Set the write timeout on TCP connections from the client, in seconds. Defaults to 2
 
   :param int num:
 

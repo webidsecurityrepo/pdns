@@ -5,13 +5,7 @@ Each served zone can have "metadata". Such metadata determines how this
 zone behaves in certain circumstances.
 
 .. warning::
-  Domain metadata is only available for DNSSEC capable
-  backends! Make sure to enable the proper '-dnssec' setting to benefit.
-
-.. warning::
-  When multiple backends are in use, domain metadata is only retrieved from
-  and written to the first DNSSEC-capable backend, no matter where the related
-  zones live.
+  When multiple backends are in use, domain metadata is only retrieved from and written to the first DNSSEC-capable or metadata-capable backend, no matter where the related zones live.
 
 For the BIND backend, this information is either stored in the
 :ref:`setting-bind-dnssec-db` or the hybrid database,
@@ -33,7 +27,7 @@ The following options can only be read (not written to) via the HTTP API metadat
 * PRESIGNED
 * TSIG-ALLOW-AXFR
 
-The option SOA-EDIT-API can not be written or read via the HTTP API metadata endpoint.
+The option SOA-EDIT-API cannot be written or read via the HTTP API metadata endpoint.
 
 .. _metadata-allow-axfr-from:
 

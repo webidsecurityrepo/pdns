@@ -50,7 +50,7 @@ dnsdist depends on the following libraries:
 * `Editline (libedit) <http://thrysoee.dk/editline/>`_
 * `libfstrm <https://github.com/farsightsec/fstrm>`_ (optional, dnstap support)
 * `GnuTLS <https://www.gnutls.org/>`_ (optional, DoT and outgoing DoH support)
-* `libh2o <https://github.com/h2o/h2o>`_ (optional, incoming DoH support)
+* `libh2o <https://github.com/h2o/h2o>`_ (optional, incoming DoH support, deprecated in 1.9.0 in favor of ``nghttp2``)
 * `libcap <https://sites.google.com/site/fullycapable/>`_ (optional, capabilities support)
 * `libsodium <https://download.libsodium.org/doc/>`_ (optional, DNSCrypt and console encryption support)
 * `LMDB <http://www.lmdb.tech/doc/>`_ (optional, LMDB support)
@@ -58,6 +58,7 @@ dnsdist depends on the following libraries:
 * `nghttp2 <https://nghttp2.org/>`_ (optional, outgoing DoH support)
 * `OpenSSL <https://www.openssl.org/>`_ (optional, DoT and DoH support)
 * `protobuf <https://developers.google.com/protocol-buffers/>`_ (optional, not needed as of 1.6.0)
+* `quiche <https://github.com/cloudflare/quiche>`_ (optional, incoming DoQ support)
 * `re2 <https://github.com/google/re2>`_ (optional)
 * `TinyCDB <https://www.corpit.ru/mjt/tinycdb.html>` (optional, CDB support)
 

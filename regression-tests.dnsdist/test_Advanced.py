@@ -311,6 +311,7 @@ class TestAdvancedGetLocalAddressOnAnyBind(DNSDistTest):
     _config_params = ['_testServerPort', '_dnsDistPort', '_dnsDistPort']
     _acl = ['127.0.0.1/32', '::1/128']
     _skipListeningOnCL = True
+    _verboseMode = True
 
     def testAdvancedGetLocalAddressOnAnyBind(self):
         """
@@ -343,13 +344,13 @@ class TestAdvancedGetLocalAddressOnAnyBind(DNSDistTest):
                                     'address-was-127-0-0-2.local-address-any.advanced.tests.powerdns.com.')
         response.answer.append(rrset)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1.0)
+        sock.settimeout(2.0)
         sock.connect(('127.0.0.2', self._dnsDistPort))
         try:
             query = query.to_wire()
             sock.send(query)
             (data, remote) = sock.recvfrom(4096)
-            self.assertEquals(remote[0], '127.0.0.2')
+            self.assertEqual(remote[0], '127.0.0.2')
         except socket.timeout:
             data = None
 
@@ -376,14 +377,14 @@ class TestAdvancedGetLocalAddressOnAnyBind(DNSDistTest):
 
         # a bit more tricky, UDP-only IPv4
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1.0)
+        sock.settimeout(2.0)
         sock.connect(('127.0.0.2', self._dnsDistPort))
         self._toResponderQueue.put(response, True, 1.0)
         try:
             data = query.to_wire()
             sock.send(data)
             (data, remote) = sock.recvfrom(4096)
-            self.assertEquals(remote[0], '127.0.0.2')
+            self.assertEqual(remote[0], '127.0.0.2')
         except socket.timeout:
             data = None
 
@@ -394,16 +395,19 @@ class TestAdvancedGetLocalAddressOnAnyBind(DNSDistTest):
         self.assertEqual(receivedQuery, query)
         self.assertEqual(receivedResponse, response)
 
+        if 'SKIP_IPV6_TESTS' in os.environ:
+          return
+
         # a bit more tricky, UDP-only IPv6
         sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-        sock.settimeout(1.0)
+        sock.settimeout(2.0)
         sock.connect(('::1', self._dnsDistPort))
         self._toResponderQueue.put(response, True, 1.0)
         try:
             data = query.to_wire()
             sock.send(data)
             (data, remote) = sock.recvfrom(4096)
-            self.assertEquals(remote[0], '::1')
+            self.assertEqual(remote[0], '::1')
         except socket.timeout:
             data = None
 
@@ -425,6 +429,8 @@ class TestAdvancedGetLocalAddressOnNonDefaultLoopbackBind(DNSDistTest):
     _config_params = ['_testServerPort', '_dnsDistPort']
     _acl = ['127.0.0.1/32']
     _skipListeningOnCL = True
+    _alternateListeningAddr = '127.0.1.19'
+    _alternateListeningPort = DNSDistTest._dnsDistPort
 
     def testAdvancedCheckSourceAddrOnNonDefaultLoopbackBind(self):
         """
@@ -442,14 +448,14 @@ class TestAdvancedGetLocalAddressOnNonDefaultLoopbackBind(DNSDistTest):
 
         # a bit more tricky, UDP-only IPv4
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1.0)
+        sock.settimeout(2.0)
         sock.connect(('127.0.1.19', self._dnsDistPort))
         self._toResponderQueue.put(response, True, 1.0)
         try:
             data = query.to_wire()
             sock.send(data)
             (data, remote) = sock.recvfrom(4096)
-            self.assertEquals(remote[0], '127.0.1.19')
+            self.assertEqual(remote[0], '127.0.1.19')
         except socket.timeout:
             data = None
 
@@ -590,20 +596,21 @@ class TestCustomMetrics(DNSDistTest):
     _config_template = """
     function custommetrics(dq)
       initialCounter = getMetric("my-custom-counter")
-      initialGauge = getMetric("my-custom-counter")
+      initialGauge = getMetric("my-custom-gauge")
       incMetric("my-custom-counter")
+      incMetric("my-custom-counter", 41)
       setMetric("my-custom-gauge", initialGauge + 1.3)
-      if getMetric("my-custom-counter") ~= (initialCounter + 1) or getMetric("my-custom-gauge") ~= (initialGauge + 1.3) then
+      if getMetric("my-custom-counter") ~= (initialCounter + 42) or getMetric("my-custom-gauge") ~= (initialGauge + 1.3) then
         return DNSAction.Spoof, '1.2.3.5'
       end
       return DNSAction.Spoof, '4.3.2.1'
     end
 
     function declareNewMetric(dq)
-      if declareMetric("new-runtime-metric", "counter", "Metric declaration at runtime should fail") then
-        return DNSAction.Spoof, '1.2.3.4'
+      if declareMetric("new-runtime-metric", "counter", "Metric declaration at runtime should work fine") then
+        return DNSAction.None
       end
-      return DNSAction.None
+      return DNSAction.Spoof, '1.2.3.4'
     end
 
     declareMetric("my-custom-counter", "counter", "Number of tests run")

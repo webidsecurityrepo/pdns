@@ -32,6 +32,7 @@
 #include <fstream>
 #include <utility>
 #include <cerrno>
+#include <sys/stat.h>
 #include <termios.h>            //termios, TCSANOW, ECHO, ICANON
 #include "opensslsigners.hh"
 #ifdef HAVE_LIBSODIUM
@@ -156,8 +157,6 @@ static void loadMainConfig(const std::string& configdir)
   }
 #endif
   openssl_seed();
-  /* init rng before chroot */
-  dns_random_init();
 
   if (!::arg()["chroot"].empty()) {
     if (chroot(::arg()["chroot"].c_str())<0 || chdir("/") < 0) {
@@ -218,7 +217,7 @@ static void dbBench(const std::string& fname)
     while(B.get(rr)) {
       hits++;
     }
-    B.lookup(QType(QType::A), DNSName(std::to_string(random()))+domain, -1);
+    B.lookup(QType(QType::A), DNSName(std::to_string(dns_random_uint32()))+domain, -1);
     while(B.get(rr)) {
     }
     misses++;
@@ -485,7 +484,7 @@ static int checkZone(DNSSECKeeper &dk, UeberBackend &B, const DNSName& zone, con
           }
           svcbAliases.insert(rr.qname);
         }
-        svcbTargets.emplace(std::make_tuple(rr.qname, svcbrc->getPriority(), svcbrc->getTarget(), svcbrc->autoHint(SvcParam::ipv4hint), svcbrc->autoHint(SvcParam::ipv6hint)));
+        svcbTargets.emplace(rr.qname, svcbrc->getPriority(), svcbrc->getTarget(), svcbrc->autoHint(SvcParam::ipv4hint), svcbrc->autoHint(SvcParam::ipv6hint));
         svcbRecords.insert(rr.qname);
         break;
       case QType::HTTPS:
@@ -496,7 +495,7 @@ static int checkZone(DNSSECKeeper &dk, UeberBackend &B, const DNSName& zone, con
           }
           httpsAliases.insert(rr.qname);
         }
-        httpsTargets.emplace(std::make_tuple(rr.qname, svcbrc->getPriority(), svcbrc->getTarget(), svcbrc->autoHint(SvcParam::ipv4hint), svcbrc->autoHint(SvcParam::ipv6hint)));
+        httpsTargets.emplace(rr.qname, svcbrc->getPriority(), svcbrc->getTarget(), svcbrc->autoHint(SvcParam::ipv4hint), svcbrc->autoHint(SvcParam::ipv6hint));
         httpsRecords.insert(rr.qname);
         break;
       }
@@ -874,7 +873,7 @@ static int checkAllZones(DNSSECKeeper &dk, bool exitOnError)
 
   B.getAllDomains(&domainInfo, true, true);
   int errors=0;
-  for(auto di : domainInfo) {
+  for (auto& di : domainInfo) {
     if (checkZone(dk, B, di.zone) > 0) {
       errors++;
     }
@@ -891,10 +890,11 @@ static int checkAllZones(DNSSECKeeper &dk, bool exitOnError)
       errors++;
     }
 
-    seenInfos.insert(di);
+    seenInfos.insert(std::move(di));
 
-    if(errors && exitOnError)
+    if (errors && exitOnError) {
       return EXIT_FAILURE;
+    }
   }
   cout<<"Checked "<<domainInfo.size()<<" zones, "<<errors<<" had errors."<<endl;
   if(!errors)
@@ -1172,6 +1172,13 @@ static int editZone(const DNSName &zone, const PDNSColors& col) {
     cerr << "Zone '" << zone << "' not found!" << endl;
     return EXIT_FAILURE;
   }
+
+  /* ensure that the temporary file will only
+     be accessible by the current user, not even
+     by other users in the same group, and certainly
+     not by other users.
+  */
+  umask(S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
   vector<DNSRecord> pre, post;
   char tmpnam[]="/tmp/pdnsutil-XXXXXX";
   int tmpfd=mkstemp(tmpnam);
@@ -1264,16 +1271,17 @@ static int editZone(const DNSName &zone, const PDNSColors& col) {
     cerr << col.red() << col.bold() << "There was a problem with your zone" << col.rst() << "\nOptions are: (e)dit your changes, (r)etry with original zone, (a)pply change anyhow, (q)uit: " << std::flush;
     int c=read1char();
     cerr<<"\n";
-    if(c!='a')
+    if(c=='e') {
       post.clear();
-    if(c=='e')
       goto editMore;
-    else if(c=='r')
+    } else if(c=='r') {
+      post.clear();
       goto editAgain;
-    else if(c=='q')
+    } else if(c=='q') {
       return EXIT_FAILURE;
-    else if(c!='a')
+    } else if(c!='a') {
       goto reAsk;
+    }
   }
 
 
@@ -1842,7 +1850,7 @@ static void testSpeed(const DNSName& zone, const string& /* remote */, int cores
     throw runtime_error("No backends available for DNSSEC key storage");
   }
 
-  ChunkedSigningPipe csp(DNSName(zone), true, cores);
+  ChunkedSigningPipe csp(DNSName(zone), true, cores, 100);
 
   vector<DNSZoneRecord> signatures;
   uint32_t rnd;
@@ -1851,7 +1859,7 @@ static void testSpeed(const DNSName& zone, const string& /* remote */, int cores
   DTime dt;
   dt.set();
   for(unsigned int n=0; n < 100000; ++n) {
-    rnd = dns_random(UINT32_MAX);
+    rnd = dns_random_uint32();
     snprintf(tmp, sizeof(tmp), "%d.%d.%d.%d",
       octets[0], octets[1], octets[2], octets[3]);
     rr.content=tmp;
@@ -2257,7 +2265,7 @@ static bool showZone(DNSSECKeeper& dk, const DNSName& zone, bool exportDS = fals
 static bool secureZone(DNSSECKeeper& dk, const DNSName& zone)
 {
   // temp var for addKey
-  int64_t id;
+  int64_t id{-1};
 
   // parse attribute
   string k_algo = ::arg()["default-ksk-algorithm"];
@@ -3060,7 +3068,7 @@ try
         return EXIT_FAILURE;
       }
     }
-    int64_t id;
+    int64_t id{-1};
     if (!dk.addKey(zone, keyOrZone, algorithm, id, bits, active, published)) {
       cerr<<"Adding key failed, perhaps DNSSEC not enabled in configuration?"<<endl;
       return 1;
@@ -3179,7 +3187,7 @@ try
   }
   else if (cmds.at(0) == "clear-zone") {
     if(cmds.size() != 2) {
-      cerr<<"Syntax: pdnsutil edit-zone ZONE"<<endl;
+      cerr<<"Syntax: pdnsutil clear-zone ZONE"<<endl;
       return 0;
     }
     if (cmds.at(1) == ".")
@@ -3569,7 +3577,7 @@ try
     }
     dpk.setKey(key, flags, algo);
 
-    int64_t id;
+    int64_t id{-1};
     if (!dk.addKey(DNSName(zone), dpk, id)) {
       cerr << "Adding key failed, perhaps DNSSEC not enabled in configuration?" << endl;
       return 1;
@@ -3625,7 +3633,7 @@ try
     }
     dpk.setKey(key, flags, algo);
 
-    int64_t id;
+    int64_t id{-1};
     if (!dk.addKey(DNSName(zone), dpk, id, active, published)) {
       cerr<<"Adding key failed, perhaps DNSSEC not enabled in configuration?"<<endl;
       return 1;
@@ -3955,7 +3963,6 @@ try
         return 1;
       }
 
-      int64_t id;
       bool keyOrZone = (cmds.at(4) == "ksk" ? true : false);
       string module = cmds.at(5);
       string slot = cmds.at(6);
@@ -3988,8 +3995,8 @@ try
 
       // make sure this key isn't being reused.
       B.getDomainKeys(zone, keys);
-      id = -1;
 
+      int64_t id{-1};
       for(DNSBackend::KeyData& kd :  keys) {
         if (kd.content == iscString.str()) {
           // it's this one, I guess...
@@ -4131,7 +4138,9 @@ try
         Comment c;
         while(src->getComment(c)) {
           c.domain_id = di_new.id;
-          tgt->feedComment(c);
+          if (!tgt->feedComment(c)) {
+            throw PDNSException("Target backend does not support comments - remove them first");
+          }
           nc++;
         }
       }

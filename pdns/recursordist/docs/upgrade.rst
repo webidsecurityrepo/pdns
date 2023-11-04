@@ -4,8 +4,37 @@ Upgrade Guide
 Before upgrading, it is advised to read the :doc:`changelog/index`.
 When upgrading several versions, please read **all** notes applying to the upgrade.
 
-4.8.0 to master
----------------
+4.9.0 to 5.0.0 and master
+--------------------------
+
+YAML settings
+^^^^^^^^^^^^^
+Starting with version 5.0.0-alpha1 the settings file(s) can be specified using YAML syntax.
+The old-style settings files are still accepted but will be unsupported in a future release.
+When a ``recursor.yml`` settings file is encountered it will be processed instead of a ``recursor.conf`` file.
+Refer to :doc:`yamlsettings` for details and the :doc:`appendices/yamlconversion` guide for how to convert old-style settings to the new YAML format.
+
+Rust
+^^^^
+Some parts of the Recursor code are now written in Rust.
+This has impact if you do local builds or are third-package maintainer.
+According to `cargo msrv` the minimum version to compile the Rust code and its dependencies is 1.64.
+Some distributions ship with an older Rust compiler, see `Rustup <https://rustup.rs/>`__ for a way to install a more recent one.
+For our package builds, we install a Rust compiler from the ``Standalone`` section of `Other Rust Installation Methods <https://forge.rust-lang.org/infra/other-installation-methods.html>`__.
+
+New settings
+^^^^^^^^^^^^
+- The :ref:`setting-bypass-server-throttling-probability` setting has been introduced to try throttled servers once in a while.
+- The :ref:`setting-tcp-threads` setting has been introduced to set the number of threads dedicated to processing incoming queries over TCP.
+  Previously either the distributor thread(s) or the general worker threads would process TCP queries.
+- The :ref:`setting-qname-max-minimize-count` and :ref:`setting-qname-minimize-one-label` have been introduced to allow tuning of the parameters specified in :rfc:`9156`.
+
+Changed settings
+^^^^^^^^^^^^^^^^
+- The :ref:`setting-loglevel` can now be set to a level below 3 (error).
+
+4.8.0 to 4.9.0
+--------------
 
 Metrics
 ^^^^^^^
@@ -14,6 +43,32 @@ This allows for solving a long standing issue that some statistics were not upda
 This is now resolved, but has the consequence that some metrics (in particular response related ones) changed behaviour as they now also reflect packet cache hits, while they did not before.
 This affects the results shown by ``rec_control get-qtypelist`` and the ``response-by-qtype``, ``response-sizes`` and ``response-by-rcode`` items returned by the ``/api/v1/servers/localhost/statistics`` API endpoint.
 Additionally, most ``RCodes`` and ``QTypes`` that are marked ``Unassigned``, ``Reserved`` or ``Obsolete`` by IANA are not accounted, to reduce the memory consumed by these metrics.
+
+New settings
+^^^^^^^^^^^^
+- The :ref:`setting-packetcache-negative-ttl` settings to control the TTL of negative (NxDomain or NoData) answers in the packet cache has been introduced.
+- The :ref:`setting-stack-cache-size` setting to  control the number of allocated mthread stacks has been introduced.
+- The :ref:`setting-packetcache-shards` settings to control the number of shards in the packet cache has been introduced.
+- The :ref:`setting-aggressive-cache-min-nsec3-hit-ratio` setting to control which NSEC3 records are stored in the aggressive NSEC cache has been introduced.
+  This setting can be used to switch off aggressive caching for NSEC3 only.
+- The :ref:`setting-dnssec-disabled-algorithms` has been introduced to not use DNSSEC algorithms disabled by the platform's security policy.
+  This applies specifically to Red Hat Enterprise Linux 9 and derivatives.
+  The default value (automatically determine the algorithms that are disabled) should work for many cases.
+- The setting ``includeSOA`` was added to the :func:`rpzPrimary` and :func:`rpzFile` Lua functions to include the SOA of the RPZ the responses modified by the RPZ.
+
+Changed settings
+^^^^^^^^^^^^^^^^
+The first two settings below have effect on the way the recursor distributes queries over threads.
+In some cases, this can lead to imbalance of the number of queries process per thread.
+See :doc:`performance`, in particular the :ref:`worker_imbalance` section.
+
+- The :ref:`setting-pdns-distributes-queries` default has been changed to ``no``.
+- The :ref:`setting-reuseport` default has been changed to ``yes``.
+- The :ref:`setting-packetcache-ttl` default has been changed to 24 hours.
+- The :ref:`setting-max-recursion-depth` default has been changed to 16. Before it was, 40, but effectively the CNAME length chain limit (fixed at 16) took precedence.
+  If you increase :ref:`setting-max-recursion-depth`, you also have to increase :ref:`setting-stack-size`.
+  A starting point of 5k per recursion depth is suggested. Add some extra safety margin to avoid running out of stack.
+- The :ref:`setting-hint-file` setting gained a new special value to disable refreshing of root hints completely. See :ref:`handling-of-root-hints`.
 
 :program:`rec_control`
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -60,7 +115,6 @@ The ``dump-throttle`` and ``dump-edns`` subcommands no longer produces a table p
 Additionally, the ``dump-edns`` command  now only lists IPs that have a not OK status.
 The ``dump-nsspeeds`` command has changed format to make it more readable and lists the last round trip time recorded for each address.
 The ``get-proxymapping-stats`` and ``get-remotelogger-stats`` subcommands have been added.
-
 
 4.7.2 to 4.7.3
 --------------
@@ -221,7 +275,7 @@ Deprecated and changed settings
 
 Removed settings
 ^^^^^^^^^^^^^^^^
-- The :ref:`setting-query-local-address6` has been removed. It already was deprecated.
+- The ``query-local-address6`` setting has been removed. It already was deprecated.
 
 4.3.x to 4.4.0
 --------------
@@ -247,7 +301,7 @@ inconsistent results.
 Deprecated and changed settings
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 - The :ref:`setting-query-local-address` setting has been modified to be able to include both IPv4 and IPv6 addresses.
-- The :ref:`setting-query-local-address6` settings is now deprecated.
+- The ``query-local-address6`` setting is now deprecated.
 
 New settings
 ^^^^^^^^^^^^
@@ -299,8 +353,8 @@ New settings
 
 Two new settings have been added:
 
-- :ref:`setting-xpf-allow-from` can contain a list of IP addresses ranges from which `XPF (X-Proxied-For) <https://datatracker.ietf.org/doc/draft-bellis-dnsop-xpf/>`_ records will be trusted.
-- :ref:`setting-xpf-rr-code` should list the number of the XPF record to use (in lieu of an assigned code).
+- ``xpf-allow-from`` can contain a list of IP addresses ranges from which `XPF (X-Proxied-For) <https://datatracker.ietf.org/doc/draft-bellis-dnsop-xpf/>`_ records will be trusted.
+- ``setting-xpf-rr-code`` should list the number of the XPF record to use (in lieu of an assigned code).
 
 4.0.x to 4.1.0
 --------------

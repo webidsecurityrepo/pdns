@@ -1,6 +1,7 @@
 
 #include "dnsdist.hh"
 #include "dnsdist-dynblocks.hh"
+#include "dnsdist-metrics.hh"
 
 GlobalStateHolder<NetmaskTree<DynBlock, AddressAndPortRange>> g_dynblockNMG;
 GlobalStateHolder<SuffixMatchTree<DynBlock>> g_dynblockSMT;
@@ -260,7 +261,7 @@ void DynBlockRulesGroup::addOrRefreshBlock(boost::optional<NetmaskTree<DynBlock,
     }
 
     if (!d_beQuiet) {
-      warnlog("Inserting %sdynamic block for %s for %d seconds: %s", warning ? "(warning) " :"", requestor.toString(), rule.d_blockDuration, rule.d_blockReason);
+      warnlog("Inserting %s%sdynamic block for %s for %d seconds: %s", warning ? "(warning) " :"", bpf ? "eBPF " : "", requestor.toString(), rule.d_blockDuration, rule.d_blockReason);
     }
   }
 
@@ -429,6 +430,10 @@ void DynBlockRulesGroup::processResponseRules(counts_t& counts, StatNode& root, 
 
 void DynBlockMaintenance::purgeExpired(const struct timespec& now)
 {
+  // we need to increase the dynBlocked counter when removing
+  // eBPF blocks, as otherwise it does not get incremented for these
+  // since the block happens in kernel space.
+  uint64_t bpfBlocked = 0;
   {
     auto blocks = g_dynblockNMG.getLocal();
     std::vector<AddressAndPortRange> toRemove;
@@ -436,8 +441,15 @@ void DynBlockMaintenance::purgeExpired(const struct timespec& now)
       if (!(now < entry.second.until)) {
         toRemove.push_back(entry.first);
         if (g_defaultBPFFilter && entry.second.bpf) {
+          const auto& network = entry.first.getNetwork();
           try {
-            g_defaultBPFFilter->unblock(entry.first.getNetwork());
+            bpfBlocked += g_defaultBPFFilter->getHits(network);
+          }
+          catch (const std::exception& e) {
+            vinfolog("Error while getting block count before removing eBPF dynamic block for %s: %s", entry.first.toString(), e.what());
+          }
+          try {
+            g_defaultBPFFilter->unblock(network);
           }
           catch (const std::exception& e) {
             vinfolog("Error while removing eBPF dynamic block for %s: %s", entry.first.toString(), e.what());
@@ -451,6 +463,7 @@ void DynBlockMaintenance::purgeExpired(const struct timespec& now)
         updated.erase(entry);
       }
       g_dynblockNMG.setState(std::move(updated));
+      dnsdist::metrics::g_stats.dynBlocked += bpfBlocked;
     }
   }
 

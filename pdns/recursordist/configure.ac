@@ -12,8 +12,8 @@ AC_CONFIG_HEADERS([config.h])
 
 AC_CANONICAL_HOST
 # Add some default CFLAGS and CXXFLAGS, can be appended to using the environment variables
-CFLAGS="-Wall -Wextra -Wshadow -Wno-unused-parameter -Wmissing-declarations -Wredundant-decls -fvisibility=hidden -g -O2 $CFLAGS"
-CXXFLAGS="-Wall -Wextra -Wshadow -Wno-unused-parameter -Wmissing-declarations -Wredundant-decls -fvisibility=hidden -g -O2 $CXXFLAGS"
+CFLAGS="-Wall -Wextra -Wshadow -Wmissing-declarations -Wredundant-decls -fvisibility=hidden -g -O2 $CFLAGS"
+CXXFLAGS="-Wall -Wextra -Wshadow -Wmissing-declarations -Wredundant-decls -fvisibility=hidden -g -O2 $CXXFLAGS"
 
 AC_SUBST([pdns_configure_args],["$ac_configure_args"])
 AC_DEFINE_UNQUOTED([PDNS_CONFIG_ARGS],
@@ -35,7 +35,10 @@ AC_DEFINE([RECURSOR], [1],
 m4_pattern_forbid([^_?PKG_[A-Z_]+$], [*** pkg.m4 missing, please install pkg-config])
 
 AX_CXX_COMPILE_STDCXX_17([noext], [mandatory])
-LT_INIT()
+
+# Rust runtime used dlopen from its static lib
+LT_INIT([dlopen])
+AC_SUBST([LIBDL], [$lt_cv_dlopen_libs])
 
 PDNS_CHECK_OS
 PDNS_CHECK_NETWORK_LIBS
@@ -63,6 +66,7 @@ AS_IF([test -n "$pdns_context_library"], [AC_MSG_RESULT([$pdns_context_library])
 
 PDNS_ENABLE_UNIT_TESTS
 PDNS_ENABLE_REPRODUCIBLE
+PDNS_ENABLE_COVERAGE
 
 PDNS_WITH_LUA([mandatory])
 AS_IF([test "x$LUAPC" = "xluajit"], [
@@ -112,7 +116,11 @@ PDNS_CHECK_CURL
 
 dnl the *_r functions are in posix so we can use them unconditionally, but the ext/yahttp code is
 dnl using the defines.
-AC_CHECK_FUNCS_ONCE([localtime_r gmtime_r strcasestr getrandom arc4random])
+AC_CHECK_FUNCS_ONCE([localtime_r gmtime_r strcasestr])
+AC_CHECK_FUNCS_ONCE([getrandom getentropy arc4random arc4random_uniform arc4random_buf])
+PDNS_CHECK_SECURE_MEMSET
+
+AC_CHECK_HEADERS([sys/random.h])
 
 PDNS_CHECK_PTHREAD_NP
 
@@ -190,10 +198,13 @@ CXXVERSION=`$CXX --version | head -1`
 
 AC_CONFIG_FILES([Makefile
 	ext/Makefile
+	ext/arc4random/Makefile
 	ext/json11/Makefile
 	ext/probds/Makefile
 	ext/yahttp/Makefile
-	ext/yahttp/yahttp/Makefile])
+	ext/yahttp/yahttp/Makefile
+	settings/Makefile
+	settings/rust/Makefile])
 
 AC_OUTPUT
 

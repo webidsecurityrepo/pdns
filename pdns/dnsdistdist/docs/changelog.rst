@@ -2,8 +2,401 @@ Changelog
 =========
 
 .. changelog::
+  :version: 1.8.2
+  :released: 11th of October 2023
+
+  This release fixes the HTTP2 rapid reset attack for the packages we provide.
+  If you are compiling DNSdist yourself or using the packages provided by your distribution,
+  please check that the h2o library has been patched to mitigate this vulnerability.
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
+
+  .. change::
+    :tags: Bug Fixes, Security
+    :pullreq: #13349
+
+    Switch to our fork of h2o to mitigate the HTTP2 rapid reset attack
+
+.. changelog::
+  :version: 1.7.5
+  :released: 11th of October 2023
+
+  This release fixes the HTTP2 rapid reset attack for the packages we provide.
+  If you are compiling DNSdist yourself or using the packages provided by your distribution,
+  please check that the h2o library has been patched to mitigate this vulnerability.
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
+
+  .. change::
+    :tags: Bug Fixes, Security
+    :pullreq: #13351
+
+    Switch to our fork of h2o to mitigate the HTTP2 rapid reset attack
+
+.. changelog::
+  :version: 1.9.0-alpha1
+  :released: 18th of September 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading.
+
+  .. change::
+    :tags: Improvements, DNS over HTTPS
+    :pullreq: 12678
+
+    Add support for incoming DoH via nghttp2
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13145
+
+    Fix building our fuzzing targets from a dist tarball
+
+  .. change::
+    :tags: Removals
+    :pullreq: 13168
+
+    Change the default for building with net-snmp from `auto` to `no`
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13135
+
+    Add a DNSHeader:getTC() Lua binding
+
+  .. change::
+    :tags: New Features
+    :pullreq: 13013
+    :tickets: 13007
+
+    Add Lua bindings to access selector and action
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13088
+
+    Stop passing -u dnsdist -g dnsdist on systemd's ExecStart
+
+  .. change::
+    :tags: Improvements, Metrics
+    :pullreq: 13009
+
+    Add metrics for health-check failures
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 12931
+
+    Use arc4random only for random values
+
+  .. change::
+    :tags: New Features
+    :pullreq: 12689
+
+    Add an option to write `grepq`'s output to a file
+
+.. changelog::
+  :version: 1.8.1
+  :released: 8th of September 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12820
+
+    Print the received, invalid health-check response ID
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12821
+
+    Account for the health-check run time between two runs
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12822
+
+    Properly set the size of the UDP health-check response
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12823
+
+    Add the query ID to health-check log messages, fix nits
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12824
+
+    Stop setting SO_REUSEADDR on outgoing UDP client sockets
+
+  .. change::
+    :tags: Bug Fixes, DNS over HTTPS
+    :pullreq: 12977
+
+    Fix a crash when X-Forwarded-For overrides the initial source IP
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13116
+
+    Properly handle short reads on backend upgrade discovery
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13117
+
+    Undo an accidentally change of disableZeroScope to disableZeroScoping (Winfried Angele)
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13118
+    :tickets: 13027
+
+    Fix the group of the dnsdist.conf file when installed via RPM
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13119
+    :tickets: 12926
+
+    Work around Red Hat 8 messing up OpenSSL's headers and refusing to fix it
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13120
+
+    Fix a typo for libedit in the dnsdist features list
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13121
+
+    Stop using the now deprecated ERR_load_CRYPTO_strings() to detect OpenSSL
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13122
+
+    Automatically load Lua FFI inspection functions
+
+  .. change::
+    :tags: New Features
+    :pullreq: 13123
+
+    Allow declaring custom metrics at runtime
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13124
+
+    Fix webserver config template for our docker container (Houtworm)
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13125
+
+    Increment the "dyn blocked" counter for eBPF blocks as well
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13127
+
+    YaHTTP: Prevent integer overflow on very large chunks
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13128
+
+    Fix the console description of PoolAction and QPSPoolAction (phonedph1)
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13129
+    :tickets: 12711
+
+    Properly handle reconnection failure for backend UDP sockets
+
+  .. change::
+    :tags: Bug Fixes, DNS over HTTPS, DNS over TLS
+    :pullreq: 13130
+
+    Fix a memory leak when processing TLS tickets w/ OpenSSL 3.x
+
+  .. change::
+    :tags: Bug Fixes, DNS over HTTPS
+    :pullreq: 13131
+    :tickets: 12762
+
+    Fix cache hit and miss metrics with DoH queries
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13132
+
+    SpoofAction: copy the QClass from the request (Christof Chen)
+
+  .. change::
+    :tags: Improvements
+    :pullreq: 13133
+
+    Make DNSQType.TSIG available (Jacob Bunk)
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 13150
+
+    Properly record self-answered UDP responses with recvmmsg
+
+  .. change::
+    :tags: Bug Fixes, DNS over TLS
+    :pullreq: 13178
+
+    Fix a race when creating the first TLS connections
+
+.. changelog::
+  :version: 1.7.4
+  :released: 14th of April 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12183
+    :tickets: 12177
+
+    Fix building with boost < 1.56
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12460
+    :tickets: 12453
+
+    lock.hh: include <stdexcept>
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12569
+
+    dnsdist-protocols.hh: include <cstdint> (Sander Hoentjen)
+
+  .. change::
+    :tags: New Features
+    :pullreq: 12621
+    :tickets: 12074
+
+    Add getPoolNames() function, returning a list of pool names (Christof Chen)
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12535
+
+    Fix the formatting of 'showServers'
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12529
+    :tickets: 11905
+
+    Properly record the incoming flags on a timeout
+
+  .. change::
+    :tags: Bug Fixes, Metrics
+    :pullreq: 12484
+    :tickets: 11498
+
+    Properly update rcode-related metrics on RCodeAction hits
+
+  .. change::
+    :tags: Bug Fixes, DNS over TLS, DNS over HTTPS
+    :pullreq: 12421
+    :tickets: 12341
+
+    Skip invalid OCSP files after issuing a warning
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12365
+    :tickets: 12357
+
+    Prevent an underflow of the TCP d_queued counter
+
+  .. change::
+    :tags: Bug Fixes, DNS over HTTPS
+    :pullreq: 12327
+
+    Fix the health-check timeout computation for DoH backend
+
+  .. change::
+    :tags: Bug Fixes, Webserver
+    :pullreq: 12260
+    :tickets: 9349
+
+    Properly encode json strings containing binary data
+
+  .. change::
+    :tags: Bug Fixes, DNS over TLS
+    :pullreq: 12237
+    :tickets: 12236
+
+    Ignore unclean TLS session shutdown
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12100
+    :tickets: 12099
+
+    Properly handle single-SOA XFR responses
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 11830
+    :tickets: 4155
+
+    Also reconnect on ENETUNREACH. (Asgeir Storesund Nilsen)
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 11729
+    :tickets: 11728
+
+    Fix a bug in SetEDNSOptionAction
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 11718
+
+    Fix the number of concurrent queries on a backend TCP conn
+
+.. changelog::
+  :version: 1.8.0
+  :released: 30th of March 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12687
+
+    Fix 'Unknown key' issue for actions and rules parameters
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12672
+
+    Fix a dnsheader unaligned case
+
+  .. change::
+    :tags: Bug Fixes
+    :pullreq: 12654
+
+    secpoll: explicitly include necessary ctime header for time_t
+
+.. changelog::
   :version: 1.8.0-rc3
   :released: 16th of March 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
 
   .. change::
     :tags: Bug Fixes
@@ -38,6 +431,8 @@ Changelog
 .. changelog::
   :version: 1.8.0-rc2
   :released: 9th of March 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
 
   .. change::
     :tags: Improvements, Protobuf
@@ -84,6 +479,8 @@ Changelog
 .. changelog::
   :version: 1.8.0-rc1
   :released: 23rd of February 2023
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.8.x.
 
   .. change::
     :tags: Bug Fixes
@@ -901,13 +1298,13 @@ Changelog
     :tags: New Features, DNS over HTTPS, DNS over TLS
     :pullreq: 11027
 
-    Add support for password protected PCKS12 files for TLS configuration
+    Add support for password protected PKCS12 files for TLS configuration
 
   .. change::
     :tags: New Features
     :pullreq: 11051
 
-     Add support to spoof a full self-generated response from lua
+    Add support to spoof a full self-generated response from lua
 
   .. change::
     :tags: New Features
@@ -937,6 +1334,8 @@ Changelog
   :version: 1.7.3
   :released: 2nd of November 2022
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
+
   dnsdist 1.7.3 contains no functional changes or bugfixes.
   This release strictly serves to bring dnsdist packages to our EL9 and Ubuntu Jammy repositories, and upgrades the dnsdist Docker image from Debian buster to Debian bullseye, as buster is officially EOL.
 
@@ -961,6 +1360,8 @@ Changelog
 .. changelog::
   :version: 1.7.2
   :released: 14th of June 2022
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
 
   .. change::
     :tags: Improvements
@@ -1007,6 +1408,8 @@ Changelog
 .. changelog::
   :version: 1.7.1
   :released: 25th of April 2022
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
 
   .. change::
     :tags: Improvements
@@ -1128,6 +1531,8 @@ Changelog
   :version: 1.7.0
   :released: 17th of January 2022
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 11156
@@ -1138,6 +1543,8 @@ Changelog
 .. changelog::
   :version: 1.7.0-rc1
   :released: 22nd of December 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
 
   .. change::
     :tags: Improvements, DNS over TLS, Performance
@@ -1215,6 +1622,8 @@ Changelog
 .. changelog::
   :version: 1.7.0-beta1
   :released: 16th of November 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
 
   .. change::
     :tags: Improvements
@@ -1339,6 +1748,8 @@ Changelog
   :version: 1.7.0-alpha2
   :released: 19th of October 2021
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
+
   .. change::
     :tags: Improvements
     :pullreq: 10760
@@ -1441,6 +1852,8 @@ Changelog
 .. changelog::
   :version: 1.7.0-alpha1
   :released: 23rd of September 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.7.x.
 
   .. change::
     :tags: Improvements
@@ -1605,6 +2018,8 @@ Changelog
   :version: 1.6.1
   :released: 15th of September 2021
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 10438
@@ -1656,9 +2071,13 @@ Changelog
   :version: 1.6.0
   :released: 11th of May 2021
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
+
 .. changelog::
   :version: 1.5.2
   :released: 10th of May 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
 
   .. change::
     :tags: Bug Fixes
@@ -1737,6 +2156,8 @@ Changelog
   :version: 1.6.0-rc2
   :released: 4th of May 2021
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
+
   .. change::
     :tags: Improvements, Metrics
     :pullreq: 10323
@@ -1759,6 +2180,8 @@ Changelog
 .. changelog::
   :version: 1.6.0-rc1
   :released: 20th of April 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
 
   .. change::
     :tags: Bug Fixes
@@ -1795,6 +2218,8 @@ Changelog
 .. changelog::
   :version: 1.6.0-alpha3
   :released: 29th of March 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
 
   .. change::
     :tags: Improvements
@@ -1860,6 +2285,8 @@ Changelog
 .. changelog::
   :version: 1.6.0-alpha2
   :released: 4th of March 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
 
  .. change::
     :tags: Improvements
@@ -1933,6 +2360,8 @@ Changelog
 .. changelog::
   :version: 1.6.0-alpha1
   :released: 2nd of February 2021
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.6.x.
 
   .. change::
     :tags: Improvements
@@ -2177,7 +2606,7 @@ Changelog
     :tags: Bug Fixes
     :pullreq: 9925
 
-    Appease clang++ 12 ASAN on MacOS
+    Appease clang++ 12 ASAN on macOS
 
   .. change::
     :tags: Improvements
@@ -2328,6 +2757,8 @@ Changelog
   :version: 1.5.1
   :released: 1st of October 2020
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
+
   .. change::
     :tags: Improvements
     :pullreq: 9540
@@ -2363,6 +2794,8 @@ Changelog
 .. changelog::
   :version: 1.5.0
   :released: 30th of July 2020
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
 
   .. change::
     :tags: Improvements
@@ -2417,6 +2850,8 @@ Changelog
   :version: 1.5.0-rc4
   :released: 7th of July 2020
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 9278
@@ -2426,6 +2861,8 @@ Changelog
 .. changelog::
   :version: 1.5.0-rc3
   :released: 18th of June 2020
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
 
   .. change::
     :tags: Improvements
@@ -2481,6 +2918,8 @@ Changelog
 .. changelog::
   :version: 1.5.0-rc2
   :released: 13th of May 2020
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
 
   .. change::
     :tags: Bug Fixes
@@ -2554,6 +2993,8 @@ Changelog
   :version: 1.5.0-rc1
   :released: 16th of April 2020
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 8955
@@ -2601,6 +3042,8 @@ Changelog
 .. changelog::
   :version: 1.5.0-alpha1
   :released: 20th of March 2020
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.5.x.
 
   .. change::
     :tags: Improvements
@@ -2903,6 +3346,8 @@ Changelog
   :version: 1.4.0
   :released: 20th of November 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 8524
@@ -2943,6 +3388,8 @@ Changelog
   :version: 1.4.0-rc5
   :released: 30th of October 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
   .. change::
     :tags: Improvements, DNS over HTTPS, Metrics
     :pullreq: 8465
@@ -2958,6 +3405,8 @@ Changelog
 .. changelog::
   :version: 1.4.0-rc4
   :released: 25th of October 2019
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
 
   .. change::
     :tags: New Features, DNS over HTTPS, DNS over TLS
@@ -3099,6 +3548,9 @@ Changelog
   :version: 1.4.0-rc3
   :released: 30th of September 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
+
   .. change::
     :tags: Improvements
     :pullreq: 8083
@@ -3178,6 +3630,9 @@ Changelog
   :version: 1.4.0-rc2
   :released: 2nd of September 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
+
   .. change::
     :tags: New Features
     :pullreq: 8139
@@ -3218,6 +3673,8 @@ Changelog
 .. changelog::
   :version: 1.4.0-rc1
   :released: 12th of August 2019
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
 
   .. change::
     :tags: Improvements
@@ -3504,6 +3961,8 @@ Changelog
   :version: 1.4.0-beta1
   :released: 6th of June 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
   .. change::
     :tags: Bug Fixes, DoH
     :pullreq: 7814
@@ -3541,6 +4000,8 @@ Changelog
   :version: 1.4.0-alpha2
   :released: 26th of April 2019
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
+
   .. change::
     :tags: Improvements
     :pullreq: 7410
@@ -3569,6 +4030,8 @@ Changelog
 .. changelog::
   :version: 1.4.0-alpha1
   :released: 12th of April 2019
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.4.x.
 
  .. change::
     :tags: New Features
@@ -3840,6 +4303,8 @@ Changelog
   :version: 1.3.3
   :released: 8th of November 2018
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.3.x.
+
   .. change::
     :tags: New Features
     :pullreq: 6737, 6939
@@ -4026,6 +4491,8 @@ Changelog
   :version: 1.3.2
   :released: 10th of July 2018
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.3.x.
+
   .. change::
     :tags: Bug Fixes
     :pullreq: 6785
@@ -4035,6 +4502,8 @@ Changelog
 .. changelog::
   :version: 1.3.1
   :released: 10th of July 2018
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.3.x.
 
   .. change::
     :tags: Improvements
@@ -4349,6 +4818,8 @@ Changelog
   :version: 1.3.0
   :released: 30th of March 2018
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.3.x.
+
   .. change::
     :tags: Improvements, New Features
     :pullreq: 5576, 5860
@@ -4594,6 +5065,8 @@ Changelog
   :version: 1.2.1
   :released: 16th of February 2018
 
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.2.x.
+
   .. change::
     :tags: New Features
     :pullreq: 5880
@@ -4671,6 +5144,8 @@ Changelog
 .. changelog::
   :version: 1.2.0
   :released: 21st of August 2017
+
+  Please review the :doc:`Upgrade Guide <../upgrade_guide>` before upgrading from versions < 1.2.x.
 
   .. change::
     :tags: Improvements

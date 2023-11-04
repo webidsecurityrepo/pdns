@@ -73,27 +73,27 @@ plus various other directories with `regression-tests.*` names.
 * If this commit fixes an issue, put "Closes #XXXX" in the message
 * Do not put whitespace fixes/cleanup and functionality changes in the same commit
 
-# Coding Guidelines
+# Formatting and Coding Guidelines
 
 ## `clang-format`
 
-We have `clang-format` in place, but not for all files yet.
-This is an incremental process.
-If you're adding new code, adhering to the formatting config is appreciated.
-Formatting breakage in already formatted files will be caught by the CI.
-To format all files that are supposed to be formatted, run `make format-code` in the root of the tree.
+We have `clang-format` in place, but not for all files yet. We are working towards a fully formatted codebase in an incremental fashion.
 
-## Additional guidelines
+If you're adding new code, adhering to the formatting configuration available in `.clang-format` is appreciated. If you are touching code that is not yet formatted, it would also be very appreciated to format it in a separate commit first.
 
-* Don't have end-of-line whitespace
-* Use spaces instead of tabs
-* Although the codebase does not consistently have them, [docblock](https://www.doxygen.nl/manual/docblocks.html)s on functions and classes are appreciated
-* Never hesitate to write comments on anything that might not be immediately clear just from reading the code
-* When adding whole new things, consider putting them in a `pdns::X` namespace. Look for `namespace pdns` in the codebase for examples.
+Any formatting breakage in already formatted files will be caught by the CI. To format all files that are supposed to be formatted, run `make format-code` in the root of the tree.
+
+## Formatting guidelines
+
+* Don't have end-of-line whitespace.
+* Use spaces instead of tabs.
+
+## Coding guidelines
+
+The coding guidelines can be found in the repository at
+[CODING_GUIDELINES.md](https://github.com/PowerDNS/pdns/blob/master/CODING_GUIDELINES.md)
 
 ## Code Checkers
-
-Even though we don't automatically run any of the code checkers listed below as part of our CI, it might make sense to run them manually, not only on newly added code, but to also improve existing code.
 
 ### `clang-tidy`
 
@@ -110,6 +110,30 @@ We provide two configuration files for `clang-tidy`:
 
 2. A more complete [.clang-tidy.full](.clang-tidy.full) which enables almost all available checks.
    This configuration can be enabled using `ln -sf .clang-tidy.full .clang-tidy` and is recommended for all new code.
+
+### `clang-tidy` and CI
+
+We run `clang-tidy` using the `.clang-tidy.full` configuration as part of our CI. `clang-tidy` warnings will show up on a pull request if any are introduced.
+
+However, it may happen that existing code could produce warnings and can show up too due to being part of the pull request. In such a case there are two options:
+
+1. Fix the warnings in a separate commit.
+2. If fixing the warning would be too much trouble at this point in time, disabling the specific warning using the `// NOLINTNEXTLINE` or `// NOLINT` directives can be acceptable given the following is adhered to:
+
+Any added `// NOLINTNEXTLINE` or `// NOLINT` directive or others need to have a Github issue title, issue number and link next to them in the description along with the name or Github nickname of the person that wrote it. The Github issue must have an assignee and an accurate description of what needs to be done. As an example:
+
+`// NOLINTNEXTLINE(<warning-name>) <issue-number> <issue-link> <person-name>: <issue-title> + a short comment if needed.`
+
+If the warning cannot be avoided in any way, a good explanation is needed. As an example:
+
+`// NOLINTNEXTLINE(*-cast): Using the OpenSSL C APIs.`
+
+### Additional checkers
+
+Even though we don't automatically run any of the code checkers listed below as part of our CI, it might make sense to run them manually, not only on newly added code, but to also improve existing code.
+
+* `clang`'s static analyzer, sometimes also referred as `scan-build`
+* `cppcheck`
 
 # Development Environment
 

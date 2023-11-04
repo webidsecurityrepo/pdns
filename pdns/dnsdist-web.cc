@@ -34,6 +34,7 @@
 #include "dnsdist.hh"
 #include "dnsdist-dynblocks.hh"
 #include "dnsdist-healthchecks.hh"
+#include "dnsdist-metrics.hh"
 #include "dnsdist-prometheus.hh"
 #include "dnsdist-web.hh"
 #include "dolog.hh"
@@ -212,9 +213,9 @@ std::map<std::string, MetricDefinition> MetricDefinitionStorage::metrics{
 };
 #endif /* DISABLE_PROMETHEUS */
 
-bool addMetricDefinition(const std::string& name, const std::string& type, const std::string& description, const std::string& customName) {
+bool addMetricDefinition(const dnsdist::prometheus::PrometheusMetricDefinition& def) {
 #ifndef DISABLE_PROMETHEUS
-  return MetricDefinitionStorage::addMetricDefinition(name, type, description, customName);
+  return MetricDefinitionStorage::addMetricDefinition(def);
 #else
   return true;
 #endif /* DISABLE_PROMETHEUS */
@@ -224,7 +225,7 @@ bool addMetricDefinition(const std::string& name, const std::string& type, const
 static bool apiWriteConfigFile(const string& filebasename, const string& content)
 {
   if (!g_apiReadWrite) {
-    errlog("Not writing content to %s since the API is read-only", filebasename);
+    warnlog("Not writing content to %s since the API is read-only", filebasename);
     return false;
   }
 
@@ -467,72 +468,77 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
 
   std::ostringstream output;
   static const std::set<std::string> metricBlacklist = { "special-memory-usage", "latency-count", "latency-sum" };
-  for (const auto& e : g_stats.entries) {
-    const auto& metricName = std::get<0>(e);
+  {
+    auto entries = dnsdist::metrics::g_stats.entries.read_lock();
+    for (const auto& entry : *entries) {
+      const auto& metricName = entry.d_name;
 
-    if (metricBlacklist.count(metricName) != 0) {
-      continue;
-    }
+      if (metricBlacklist.count(metricName) != 0) {
+        continue;
+      }
 
-    MetricDefinition metricDetails;
-    if (!s_metricDefinitions.getMetricDetails(metricName, metricDetails)) {
-      vinfolog("Do not have metric details for %s", metricName);
-      continue;
-    }
+      MetricDefinition metricDetails;
+      if (!s_metricDefinitions.getMetricDetails(metricName, metricDetails)) {
+        vinfolog("Do not have metric details for %s", metricName);
+        continue;
+      }
 
-    const std::string prometheusTypeName = s_metricDefinitions.getPrometheusStringMetricType(metricDetails.prometheusType);
-    if (prometheusTypeName.empty()) {
-      vinfolog("Unknown Prometheus type for %s", metricName);
-      continue;
-    }
+      const std::string prometheusTypeName = s_metricDefinitions.getPrometheusStringMetricType(metricDetails.prometheusType);
+      if (prometheusTypeName.empty()) {
+        vinfolog("Unknown Prometheus type for %s", metricName);
+        continue;
+      }
 
-    // Prometheus suggest using '_' instead of '-'
-    std::string prometheusMetricName;
-    if (metricDetails.customName.empty()) {
-      prometheusMetricName = "dnsdist_" + boost::replace_all_copy(metricName, "-", "_");
-    }
-    else {
-      prometheusMetricName = metricDetails.customName;
-    }
+      // Prometheus suggest using '_' instead of '-'
+      std::string prometheusMetricName;
+      if (metricDetails.customName.empty()) {
+        prometheusMetricName = "dnsdist_" + boost::replace_all_copy(metricName, "-", "_");
+      }
+      else {
+        prometheusMetricName = metricDetails.customName;
+      }
 
-    // for these we have the help and types encoded in the sources:
-    output << "# HELP " << prometheusMetricName << " " << metricDetails.description    << "\n";
-    output << "# TYPE " << prometheusMetricName << " " << prometheusTypeName << "\n";
-    output << prometheusMetricName << " ";
+      // for these we have the help and types encoded in the sources
+      // but we need to be careful about labels in custom metrics
+      std::string helpName = prometheusMetricName.substr(0, prometheusMetricName.find('{'));
+      output << "# HELP " << helpName << " " << metricDetails.description    << "\n";
+      output << "# TYPE " << helpName << " " << prometheusTypeName << "\n";
+      output << prometheusMetricName << " ";
 
-    if (const auto& val = boost::get<pdns::stat_t*>(&std::get<1>(e))) {
-      output << (*val)->load();
-    }
-    else if (const auto& adval = boost::get<pdns::stat_t_trait<double>*>(&std::get<1>(e))) {
-      output << (*adval)->load();
-    }
-    else if (const auto& dval = boost::get<double*>(&std::get<1>(e))) {
-      output << **dval;
-    }
-    else if (const auto& func = boost::get<DNSDistStats::statfunction_t>(&std::get<1>(e))) {
-      output << (*func)(std::get<0>(e));
-    }
+      if (const auto& val = std::get_if<pdns::stat_t*>(&entry.d_value)) {
+        output << (*val)->load();
+      }
+      else if (const auto& adval = std::get_if<pdns::stat_t_trait<double>*>(&entry.d_value)) {
+        output << (*adval)->load();
+      }
+      else if (const auto& dval = std::get_if<double*>(&entry.d_value)) {
+        output << **dval;
+      }
+      else if (const auto& func = std::get_if<dnsdist::metrics::Stats::statfunction_t>(&entry.d_value)) {
+        output << (*func)(entry.d_name);
+      }
 
-    output << "\n";
+      output << "\n";
+    }
   }
 
   // Latency histogram buckets
   output << "# HELP dnsdist_latency Histogram of responses by latency (in milliseconds)\n";
   output << "# TYPE dnsdist_latency histogram\n";
-  uint64_t latency_amounts = g_stats.latency0_1;
+  uint64_t latency_amounts = dnsdist::metrics::g_stats.latency0_1;
   output << "dnsdist_latency_bucket{le=\"1\"} " << latency_amounts << "\n";
-  latency_amounts += g_stats.latency1_10;
+  latency_amounts += dnsdist::metrics::g_stats.latency1_10;
   output << "dnsdist_latency_bucket{le=\"10\"} " << latency_amounts << "\n";
-  latency_amounts += g_stats.latency10_50;
+  latency_amounts += dnsdist::metrics::g_stats.latency10_50;
   output << "dnsdist_latency_bucket{le=\"50\"} " << latency_amounts << "\n";
-  latency_amounts += g_stats.latency50_100;
+  latency_amounts += dnsdist::metrics::g_stats.latency50_100;
   output << "dnsdist_latency_bucket{le=\"100\"} " << latency_amounts << "\n";
-  latency_amounts += g_stats.latency100_1000;
+  latency_amounts += dnsdist::metrics::g_stats.latency100_1000;
   output << "dnsdist_latency_bucket{le=\"1000\"} " << latency_amounts << "\n";
-  latency_amounts += g_stats.latencySlow; // Should be the same as latency_count
+  latency_amounts += dnsdist::metrics::g_stats.latencySlow; // Should be the same as latency_count
   output << "dnsdist_latency_bucket{le=\"+Inf\"} " << latency_amounts << "\n";
-  output << "dnsdist_latency_sum " << g_stats.latencySum << "\n";
-  output << "dnsdist_latency_count " << g_stats.latencyCount << "\n";
+  output << "dnsdist_latency_sum " << dnsdist::metrics::g_stats.latencySum << "\n";
+  output << "dnsdist_latency_count " << dnsdist::metrics::g_stats.latencyCount << "\n";
 
   auto states = g_dstates.getLocal();
   const string statesbase = "dnsdist_server_";
@@ -587,6 +593,18 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
   output << "# TYPE " << statesbase << "tlsresumptions "                  << "counter"                                                                              << "\n";
   output << "# HELP " << statesbase << "tcplatency "                      << "Server's latency when answering TCP questions in milliseconds"                        << "\n";
   output << "# TYPE " << statesbase << "tcplatency "                      << "gauge"                                                                                << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailures "             << "Number of health check attempts that failed (total)"                                  << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailures "             << "counter"                                                                              << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailuresparsing "      << "Number of health check attempts where the response could not be parsed"               << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailuresparsing "      << "counter"                                                                              << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailurestimeout "      << "Number of health check attempts where the response did not arrive in time"            << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailurestimeout "      << "counter"                                                                              << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailuresnetwork "      << "Number of health check attempts that experienced a network issue"                     << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailuresnetwork "      << "counter"                                                                              << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailuresmismatch "     << "Number of health check attempts where the response did not match the query"           << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailuresmismatch "     << "counter"                                                                              << "\n";
+  output << "# HELP " << statesbase << "healthcheckfailuresinvalid "      << "Number of health check attempts where the DNS response was invalid"                   << "\n";
+  output << "# TYPE " << statesbase << "healthcheckfailuresinvalid "      << "counter"                                                                              << "\n";
 
   for (const auto& state : *states) {
     string serverName;
@@ -630,6 +648,12 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
     output << statesbase << "tcpavgqueriesperconn"             << label << " " << state->tcpAvgQueriesPerConnection      << "\n";
     output << statesbase << "tcpavgconnduration"               << label << " " << state->tcpAvgConnectionDuration        << "\n";
     output << statesbase << "tlsresumptions"                   << label << " " << state->tlsResumptions                  << "\n";
+    output << statesbase << "healthcheckfailures"              << label << " " << state->d_healthCheckMetrics.d_failures << "\n";
+    output << statesbase << "healthcheckfailuresparsing"       << label << " " << state->d_healthCheckMetrics.d_parseErrors << "\n";
+    output << statesbase << "healthcheckfailurestimeout"       << label << " " << state->d_healthCheckMetrics.d_timeOuts << "\n";
+    output << statesbase << "healthcheckfailuresnetwork"       << label << " " << state->d_healthCheckMetrics.d_networkErrors << "\n";
+    output << statesbase << "healthcheckfailuresmismatch"      << label << " " << state->d_healthCheckMetrics.d_mismatchErrors << "\n";
+    output << statesbase << "healthcheckfailuresinvalid"        << label << " " << state->d_healthCheckMetrics.d_invalidResponseErrors << "\n";
   }
 
   const string frontsbase = "dnsdist_frontend_";
@@ -645,8 +669,8 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
   output << "# TYPE " << frontsbase << "tcpdiedsendingresponse " << "counter" << "\n";
   output << "# HELP " << frontsbase << "tcpgaveup " << "Amount of TCP connections terminated after too many attempts to get a connection to the backend" << "\n";
   output << "# TYPE " << frontsbase << "tcpgaveup " << "counter" << "\n";
-  output << "# HELP " << frontsbase << "tcpclientimeouts " << "Amount of TCP connections terminated by a timeout while reading from the client" << "\n";
-  output << "# TYPE " << frontsbase << "tcpclientimeouts " << "counter" << "\n";
+  output << "# HELP " << frontsbase << "tcpclienttimeouts " << "Amount of TCP connections terminated by a timeout while reading from the client" << "\n";
+  output << "# TYPE " << frontsbase << "tcpclienttimeouts " << "counter" << "\n";
   output << "# HELP " << frontsbase << "tcpdownstreamtimeouts " << "Amount of TCP connections terminated by a timeout while reading from the backend" << "\n";
   output << "# TYPE " << frontsbase << "tcpdownstreamtimeouts " << "counter" << "\n";
   output << "# HELP " << frontsbase << "tcpcurrentconnections " << "Amount of current incoming TCP connections from clients" << "\n";
@@ -667,7 +691,6 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
   output << "# TYPE " << frontsbase << "tlsunknownticketkeys " << "counter" << "\n";
   output << "# HELP " << frontsbase << "tlsinactiveticketkeys " << "Amount of TLS sessions resumed from an inactive key" << "\n";
   output << "# TYPE " << frontsbase << "tlsinactiveticketkeys " << "counter" << "\n";
-
   output << "# HELP " << frontsbase << "tlshandshakefailures " << "Amount of TLS handshake failures" << "\n";
   output << "# TYPE " << frontsbase << "tlshandshakefailures " << "counter" << "\n";
 
@@ -695,7 +718,7 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
       output << frontsbase << "tcpdiedreadingquery" << label << front->tcpDiedReadingQuery.load() << "\n";
       output << frontsbase << "tcpdiedsendingresponse" << label << front->tcpDiedSendingResponse.load() << "\n";
       output << frontsbase << "tcpgaveup" << label << front->tcpGaveUp.load() << "\n";
-      output << frontsbase << "tcpclientimeouts" << label << front->tcpClientTimeouts.load() << "\n";
+      output << frontsbase << "tcpclienttimeouts" << label << front->tcpClientTimeouts.load() << "\n";
       output << frontsbase << "tcpdownstreamtimeouts" << label << front->tcpDownstreamTimeouts.load() << "\n";
       output << frontsbase << "tcpcurrentconnections" << label << front->tcpCurrentConnections.load() << "\n";
       output << frontsbase << "tcpmaxconcurrentconnections" << label << front->tcpMaxConcurrentConnections.load() << "\n";
@@ -718,7 +741,7 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
           errorCounters = &front->tlsFrontend->d_tlsCounters;
         }
         else if (front->dohFrontend != nullptr) {
-          errorCounters = &front->dohFrontend->d_tlsCounters;
+          errorCounters = &front->dohFrontend->d_tlsContext.d_tlsCounters;
         }
 
         if (errorCounters != nullptr) {
@@ -756,7 +779,7 @@ static void handlePrometheus(const YaHTTP::Request& req, YaHTTP::Response& resp)
 #ifdef HAVE_DNS_OVER_HTTPS
   std::map<std::string,uint64_t> dohFrontendDuplicates;
   for(const auto& doh : g_dohlocals) {
-    const string frontName = doh->d_local.toStringWithPort();
+    const string frontName = doh->d_tlsContext.d_addr.toStringWithPort();
     uint64_t threadNumber = 0;
     auto dupPair = frontendDuplicates.emplace(frontName, 1);
     if (!dupPair.second) {
@@ -890,18 +913,19 @@ using namespace json11;
 
 static void addStatsToJSONObject(Json::object& obj)
 {
-  for (const auto& e : g_stats.entries) {
-    if (e.first == "special-memory-usage") {
+  auto entries = dnsdist::metrics::g_stats.entries.read_lock();
+  for (const auto& entry : *entries) {
+    if (entry.d_name == "special-memory-usage") {
       continue; // Too expensive for get-all
     }
-    if (const auto& val = boost::get<pdns::stat_t*>(&e.second)) {
-      obj.emplace(e.first, (double)(*val)->load());
-    } else if (const auto& adval = boost::get<pdns::stat_t_trait<double>*>(&e.second)) {
-      obj.emplace(e.first, (*adval)->load());
-    } else if (const auto& dval = boost::get<double*>(&e.second)) {
-      obj.emplace(e.first, (**dval));
-    } else if (const auto& func = boost::get<DNSDistStats::statfunction_t>(&e.second)) {
-      obj.emplace(e.first, (double)(*func)(e.first));
+    if (const auto& val = std::get_if<pdns::stat_t*>(&entry.d_value)) {
+      obj.emplace(entry.d_name, (double)(*val)->load());
+    } else if (const auto& adval = std::get_if<pdns::stat_t_trait<double>*>(&entry.d_value)) {
+      obj.emplace(entry.d_name, (*adval)->load());
+    } else if (const auto& dval = std::get_if<double*>(&entry.d_value)) {
+      obj.emplace(entry.d_name, (**dval));
+    } else if (const auto& func = std::get_if<dnsdist::metrics::Stats::statfunction_t>(&entry.d_value)) {
+      obj.emplace(entry.d_name, (double)(*func)(entry.d_name));
     }
   }
 }
@@ -940,33 +964,42 @@ static void handleJSONStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
     auto nmg = g_dynblockNMG.getLocal();
     struct timespec now;
     gettime(&now);
-    for (const auto& e: *nmg) {
-      if(now < e.second.until ) {
-        Json::object thing{
-          {"reason", e.second.reason},
-          {"seconds", (double)(e.second.until.tv_sec - now.tv_sec)},
-          {"blocks", (double)e.second.blocks},
-          {"action", DNSAction::typeToString(e.second.action != DNSAction::Action::None ? e.second.action : g_dynBlockAction) },
-          {"warning", e.second.warning }
-        };
-        obj.emplace(e.first.toString(), thing);
+    for (const auto& entry: *nmg) {
+      if (!(now < entry.second.until)) {
+        continue;
       }
+      uint64_t counter = entry.second.blocks;
+      if (entry.second.bpf && g_defaultBPFFilter) {
+        counter += g_defaultBPFFilter->getHits(entry.first.getNetwork());
+      }
+      Json::object thing{
+        {"reason", entry.second.reason},
+        {"seconds", static_cast<double>(entry.second.until.tv_sec - now.tv_sec)},
+        {"blocks", static_cast<double>(counter)},
+        {"action", DNSAction::typeToString(entry.second.action != DNSAction::Action::None ? entry.second.action : g_dynBlockAction)},
+        {"warning", entry.second.warning},
+        {"ebpf", entry.second.bpf}
+      };
+      obj.emplace(entry.first.toString(), thing);
     }
 
     auto smt = g_dynblockSMT.getLocal();
     smt->visit([&now,&obj](const SuffixMatchTree<DynBlock>& node) {
-      if(now <node.d_value.until) {
-        string dom("empty");
-        if(!node.d_value.domain.empty())
-          dom = node.d_value.domain.toString();
-        Json::object thing{
-          {"reason", node.d_value.reason},
-          {"seconds", (double)(node.d_value.until.tv_sec - now.tv_sec)},
-          {"blocks", (double)node.d_value.blocks},
-          {"action", DNSAction::typeToString(node.d_value.action != DNSAction::Action::None ? node.d_value.action : g_dynBlockAction) }
-        };
-        obj.emplace(dom, thing);
+      if (!(now < node.d_value.until)) {
+        return;
       }
+      string dom("empty");
+      if (!node.d_value.domain.empty()) {
+        dom = node.d_value.domain.toString();
+      }
+      Json::object thing{
+        {"reason", node.d_value.reason},
+        {"seconds", static_cast<double>(node.d_value.until.tv_sec - now.tv_sec)},
+        {"blocks", static_cast<double>(node.d_value.blocks)},
+        {"action", DNSAction::typeToString(node.d_value.action != DNSAction::Action::None ? node.d_value.action : g_dynBlockAction)},
+        {"ebpf", node.d_value.bpf}
+      };
+      obj.emplace(dom, thing);
     });
 #endif /* DISABLE_DYNBLOCKS */
     Json my_json = obj;
@@ -987,6 +1020,23 @@ static void handleJSONStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
             {"blocks", (double)(std::get<1>(entry))}
           };
         obj.emplace(std::get<0>(entry).toString(), thing );
+      }
+    }
+    if (g_defaultBPFFilter) {
+      auto nmg = g_dynblockNMG.getLocal();
+      for (const auto& entry: *nmg) {
+        if (!(now < entry.second.until) || !entry.second.bpf) {
+          continue;
+        }
+        uint64_t counter = entry.second.blocks + g_defaultBPFFilter->getHits(entry.first.getNetwork());
+        Json::object thing{
+          {"reason", entry.second.reason},
+          {"seconds", static_cast<double>(entry.second.until.tv_sec - now.tv_sec)},
+          {"blocks", static_cast<double>(counter)},
+          {"action", DNSAction::typeToString(entry.second.action != DNSAction::Action::None ? entry.second.action : g_dynBlockAction)},
+          {"warning", entry.second.warning},
+        };
+        obj.emplace(entry.first.toString(), thing);
       }
     }
 #endif /* HAVE_EBPF */
@@ -1052,6 +1102,12 @@ static void addServerToJSON(Json::array& servers, int id, const std::shared_ptr<
     {"tcpAvgConnectionDuration", (double)a->tcpAvgConnectionDuration},
     {"tlsResumptions", (double)a->tlsResumptions},
     {"tcpLatency", (double)(a->latencyUsecTCP/1000.0)},
+    {"healthCheckFailures", (double)(a->d_healthCheckMetrics.d_failures)},
+    {"healthCheckFailuresParsing", (double)(a->d_healthCheckMetrics.d_parseErrors)},
+    {"healthCheckFailuresTimeout", (double)(a->d_healthCheckMetrics.d_timeOuts)},
+    {"healthCheckFailuresNetwork", (double)(a->d_healthCheckMetrics.d_networkErrors)},
+    {"healthCheckFailuresMismatch", (double)(a->d_healthCheckMetrics.d_mismatchErrors)},
+    {"healthCheckFailuresInvalid", (double)(a->d_healthCheckMetrics.d_invalidResponseErrors)},
     {"dropRate", (double)a->dropRate}
   };
 
@@ -1119,7 +1175,7 @@ static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
       errorCounters = &front->tlsFrontend->d_tlsCounters;
     }
     else if (front->dohFrontend != nullptr) {
-      errorCounters = &front->dohFrontend->d_tlsCounters;
+      errorCounters = &front->dohFrontend->d_tlsContext.d_tlsCounters;
     }
     if (errorCounters != nullptr) {
       frontend["tlsHandshakeFailuresDHKeyTooSmall"] = (double)errorCounters->d_dhKeyTooSmall;
@@ -1142,7 +1198,7 @@ static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
     for (const auto& doh : g_dohlocals) {
       dohs.emplace_back(Json::object{
         { "id", num++ },
-        { "address", doh->d_local.toStringWithPort() },
+        { "address", doh->d_tlsContext.d_addr.toStringWithPort() },
         { "http-connects", (double) doh->d_httpconnects },
         { "http1-queries", (double) doh->d_http1Stats.d_nbQueries },
         { "http2-queries", (double) doh->d_http2Stats.d_nbQueries },
@@ -1207,6 +1263,7 @@ static void handleStats(const YaHTTP::Request& req, YaHTTP::Response& resp)
         {"id", num++},
         {"creationOrder", (double)a.d_creationOrder},
         {"uuid", boost::uuids::to_string(a.d_id)},
+        {"name", a.d_name},
         {"matches", (double)a.d_rule->d_matches},
         {"rule", a.d_rule->toString()},
         {"action", a.d_action->toString()},
@@ -1329,37 +1386,41 @@ static void handleStatsOnly(const YaHTTP::Request& req, YaHTTP::Response& resp)
   resp.status = 200;
 
   Json::array doc;
-  for(const auto& item : g_stats.entries) {
-    if (item.first == "special-memory-usage")
-      continue; // Too expensive for get-all
+  {
+    auto entries = dnsdist::metrics::g_stats.entries.read_lock();
+    for (const auto& item : *entries) {
+      if (item.d_name == "special-memory-usage") {
+        continue; // Too expensive for get-all
+      }
 
-    if (const auto& val = boost::get<pdns::stat_t*>(&item.second)) {
-      doc.push_back(Json::object {
-          { "type", "StatisticItem" },
-          { "name", item.first },
-          { "value", (double)(*val)->load() }
-        });
-    }
-    else if (const auto& adval = boost::get<pdns::stat_t_trait<double>*>(&item.second)) {
-      doc.push_back(Json::object {
-          { "type", "StatisticItem" },
-          { "name", item.first },
-          { "value", (*adval)->load() }
-        });
-    }
-    else if (const auto& dval = boost::get<double*>(&item.second)) {
-      doc.push_back(Json::object {
-          { "type", "StatisticItem" },
-          { "name", item.first },
-          { "value", (**dval) }
-        });
-    }
-    else if (const auto& func = boost::get<DNSDistStats::statfunction_t>(&item.second)) {
-      doc.push_back(Json::object {
-          { "type", "StatisticItem" },
-          { "name", item.first },
-          { "value", (double)(*func)(item.first) }
-        });
+      if (const auto& val = std::get_if<pdns::stat_t*>(&item.d_value)) {
+        doc.push_back(Json::object {
+            { "type", "StatisticItem" },
+            { "name", item.d_name },
+            { "value", (double)(*val)->load() }
+          });
+      }
+      else if (const auto& adval = std::get_if<pdns::stat_t_trait<double>*>(&item.d_value)) {
+        doc.push_back(Json::object {
+            { "type", "StatisticItem" },
+            { "name", item.d_name },
+            { "value", (*adval)->load() }
+          });
+      }
+      else if (const auto& dval = std::get_if<double*>(&item.d_value)) {
+        doc.push_back(Json::object {
+            { "type", "StatisticItem" },
+            { "name", item.d_name },
+            { "value", (**dval) }
+          });
+      }
+      else if (const auto& func = std::get_if<dnsdist::metrics::Stats::statfunction_t>(&item.d_value)) {
+        doc.push_back(Json::object {
+            { "type", "StatisticItem" },
+            { "name", item.d_name },
+            { "value", (double)(*func)(item.d_name) }
+          });
+      }
     }
   }
   Json my_json = doc;
@@ -1570,7 +1631,7 @@ void registerWebHandler(const std::string& endpoint, std::function<void(const Ya
 
 void registerWebHandler(const std::string& endpoint, std::function<void(const YaHTTP::Request&, YaHTTP::Response&)> handler)
 {
-  s_webHandlers[endpoint] = handler;
+  s_webHandlers[endpoint] = std::move(handler);
 }
 
 void clearWebHandlers()
@@ -1723,10 +1784,10 @@ static void connectionThread(WebClientConnection&& conn)
     vinfolog("Webserver thread died with parse error exception while processing a request from %s: %s", conn.getClient().toStringWithPort(), e.what());
   }
   catch (const std::exception& e) {
-    errlog("Webserver thread died with exception while processing a request from %s: %s", conn.getClient().toStringWithPort(), e.what());
+    vinfolog("Webserver thread died with exception while processing a request from %s: %s", conn.getClient().toStringWithPort(), e.what());
   }
   catch (...) {
-    errlog("Webserver thread died with exception while processing a request from %s", conn.getClient().toStringWithPort());
+    vinfolog("Webserver thread died with exception while processing a request from %s", conn.getClient().toStringWithPort());
   }
 }
 
@@ -1809,7 +1870,7 @@ void dnsdistWebserverThread(int sock, const ComboAddress& local)
       t.detach();
     }
     catch (const std::exception& e) {
-      errlog("Had an error accepting new webserver connection: %s", e.what());
+      vinfolog("Had an error accepting new webserver connection: %s", e.what());
     }
   }
 }

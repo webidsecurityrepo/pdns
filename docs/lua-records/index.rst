@@ -49,6 +49,14 @@ addresses listen on port 443.
 If either IP address stops listening, only the other address will be
 returned. If all IP addresses are down, all candidates are returned.
 
+You can also provide multiple sets of IP addresses to prioritize a set over the
+rest. If an IP address from the first set is available, it will be returned. If
+no addresses work in the first set, the second set is tried.
+
+For example::
+
+     www    IN    LUA    A    "ifportup(443, {{'192.0.2.1', '192.0.2.2'}, {'192.0.3.1'}})"
+
 Because DNS queries require rapid answers, server availability is not checked
 synchronously. In the background, a process periodically determines if IP
 addresses mentioned in availability rules are, in fact, available.
@@ -190,7 +198,7 @@ Details & Security
 LUA records are synthesized on query. They can also be transferred via AXFR
 to other PowerDNS servers.
 
-LUA records themselves can not be queried however, as this would allow third parties to see load balancing internals
+LUA records themselves cannot be queried however, as this would allow third parties to see load balancing internals
 they do not need to see.
 
 A non-supporting DNS server will also serve a zone with LUA records, but

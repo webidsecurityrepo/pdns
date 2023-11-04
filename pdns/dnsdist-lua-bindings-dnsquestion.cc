@@ -187,7 +187,7 @@ void setupLuaBindingsDNSQuestion(LuaContext& luaCtx)
       dq.proxyProtocolValues = make_unique<std::vector<ProxyProtocolValue>>();
     }
 
-    dq.proxyProtocolValues->push_back({value, static_cast<uint8_t>(type)});
+    dq.proxyProtocolValues->push_back({std::move(value), static_cast<uint8_t>(type)});
   });
 
   luaCtx.registerFunction<LuaArray<std::string>(DNSQuestion::*)()>("getProxyProtocolValues", [](const DNSQuestion& dq) {
@@ -284,7 +284,7 @@ public:
 
     struct timeval now;
     gettimeofday(&now, nullptr);
-    sender->notifyIOError(std::move(object->query.d_idstate), now);
+    sender->notifyIOError(now, TCPResponse(std::move(object->query)));
     return true;
   }
 
@@ -499,6 +499,10 @@ private:
     dr.getMutableData() = *dr.ids.d_packet;
     auto query = dnsdist::getInternalQueryFromDQ(dr, false);
     return dnsdist::queueQueryResumptionEvent(std::move(query));
+  });
+
+  luaCtx.registerFunction<std::shared_ptr<DownstreamState>(DNSResponse::*)(void)const>("getSelectedBackend", [](const DNSResponse& dr) {
+    return dr.d_downstream;
   });
 #endif /* DISABLE_NON_FFI_DQ_BINDINGS */
 }

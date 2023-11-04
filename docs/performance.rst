@@ -63,6 +63,10 @@ the value of the :ref:`stat-qsize-q` variable. This represents the number of
 packets waiting for database attention. During normal operations the
 queue should be small.
 
+The value of :ref:`setting-queue-limit` should be set to only keep queries in
+queue for as long as someone would be interested in knowing the answer. Many
+resolvers will query other name servers for the zone quite aggressively.
+
 Logging truly kills performance as answering a question from the cache
 is an order of magnitude less work than logging a line about it. Busy
 sites will prefer to turn :ref:`setting-log-dns-details` off.
@@ -225,7 +229,7 @@ Number of entries in the metadata cache
 .. _stat-open-tcp-connections:
 
 open-tcp-connections
-~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^
 Number of currently open TCP connections
 
 .. _stat-overload-drops:
@@ -256,7 +260,7 @@ Amount of packets in the packetcache
 
 qsize-q
 ^^^^^^^
-Number of packets waiting for database attention
+Number of packets waiting for database attention, only available if :ref:`setting-receiver-threads` > 1
 
 .. _stat-query-cache-hit:
 
@@ -281,6 +285,12 @@ Number of entries in the query cache
 rd-queries
 ^^^^^^^^^^
 Number of packets sent by clients requesting recursion (regardless of if we'll be providing them with recursion).
+
+.. _stat-receive-latency:
+
+receive-latency
+^^^^^^^^^^^^^^^
+Average number of microseconds needed to receive a query
 
 .. _stat-recursing-answers:
 
@@ -389,6 +399,12 @@ Number of questions received over TCPv6
 timedout-packets
 ^^^^^^^^^^^^^^^^
 Amount of packets that were dropped because they had to wait too long internally
+
+.. _stat-send-latency:
+
+send-latency
+^^^^^^^^^^^^
+Average number of microseconds needed to send the answer
 
 .. _stat-udp-answers-bytes:
 

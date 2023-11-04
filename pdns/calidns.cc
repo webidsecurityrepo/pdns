@@ -55,10 +55,14 @@ static po::variables_map g_vm;
 
 static bool g_quiet;
 
-static void* recvThread(const vector<std::unique_ptr<Socket>>* sockets)
+//NOLINTNEXTLINE(performance-unnecessary-value-param): we do want a copy to increase the reference count, thank you very much
+static void recvThread(const std::shared_ptr<std::vector<std::unique_ptr<Socket>>> sockets)
 {
   vector<pollfd> rfds, fds;
-  for(const auto& s : *sockets) {
+  for (const auto& s : *sockets) {
+    if (s == nullptr) {
+      continue;
+    }
     struct pollfd pfd;
     pfd.fd = s->getHandle();
     pfd.events = POLLIN;
@@ -114,15 +118,20 @@ static void* recvThread(const vector<std::unique_ptr<Socket>>* sockets)
       }
     }
   }
-  return 0;
 }
 
 static ComboAddress getRandomAddressFromRange(const Netmask& ecsRange)
 {
   ComboAddress result = ecsRange.getMaskedNetwork();
   uint8_t bits = ecsRange.getBits();
-  uint32_t mod = 1 << (32 - bits);
-  result.sin4.sin_addr.s_addr = result.sin4.sin_addr.s_addr + ntohl(dns_random(mod));
+  if (bits > 0) {
+    uint32_t mod = 1 << (32 - bits);
+    result.sin4.sin_addr.s_addr = result.sin4.sin_addr.s_addr + htonl(dns_random(mod));
+  }
+  else {
+    result.sin4.sin_addr.s_addr = dns_random_uint32();
+  }
+
   return result;
 }
 
@@ -140,7 +149,7 @@ static void replaceEDNSClientSubnet(vector<uint8_t>* packet, const Netmask& ecsR
   memcpy(&packet->at(packetSize - sizeof(addr)), &addr, sizeof(addr));
 }
 
-static void sendPackets(const vector<std::unique_ptr<Socket>>& sockets, const vector<vector<uint8_t>* >& packets, int qps, ComboAddress dest, const Netmask& ecsRange)
+static void sendPackets(const vector<std::unique_ptr<Socket>>& sockets, const vector<vector<uint8_t>* >& packets, uint32_t qps, ComboAddress dest, const Netmask& ecsRange)
 {
   unsigned int burst=100;
   const auto nsecPerBurst=1*(unsigned long)(burst*1000000000.0/qps);
@@ -193,6 +202,58 @@ static void sendPackets(const vector<std::unique_ptr<Socket>>& sockets, const ve
 static void usage(po::options_description &desc) {
   cerr<<"Syntax: calidns [OPTIONS] QUERY_FILE DESTINATION INITIAL_QPS HITRATE"<<endl;
   cerr<<desc<<endl;
+}
+
+namespace {
+void parseQueryFile(const std::string& queryFile, vector<std::shared_ptr<vector<uint8_t>>>& unknown, bool useECSFromFile, bool wantRecursion, bool addECS)
+{
+  ifstream ifs(queryFile);
+  string line;
+  std::vector<std::string> fields;
+  fields.reserve(3);
+
+  while (getline(ifs, line)) {
+    vector<uint8_t> packet;
+    DNSPacketWriter::optvect_t ednsOptions;
+    boost::trim(line);
+    if (line.empty() || line.at(0) == '#') {
+      continue;
+    }
+
+    fields.clear();
+    stringtok(fields, line, "\t ");
+    if ((useECSFromFile && fields.size() < 3) || fields.size() < 2) {
+      cerr<<"Skipping invalid line '"<<line<<", it does not contain enough values"<<endl;
+      continue;
+    }
+
+    const std::string& qname = fields.at(0);
+    const std::string& qtype = fields.at(1);
+    std::string subnet;
+
+    if (useECSFromFile) {
+      subnet = fields.at(2);
+    }
+
+    DNSPacketWriter packetWriter(packet, DNSName(qname), DNSRecordContent::TypeToNumber(qtype));
+    packetWriter.getHeader()->rd = wantRecursion;
+    packetWriter.getHeader()->id = dns_random_uint16();
+
+    if (!subnet.empty() || addECS) {
+      EDNSSubnetOpts opt;
+      opt.source = Netmask(subnet.empty() ? "0.0.0.0/32" : subnet);
+      ednsOptions.emplace_back(EDNSOptionCode::ECS, makeEDNSSubnetOptsString(opt));
+    }
+
+    if (!ednsOptions.empty() || (packetWriter.getHeader()->id % 2) != 0) {
+      packetWriter.addOpt(1500, 0, EDNSOpts::DNSSECOK, ednsOptions);
+      packetWriter.commit();
+    }
+    unknown.push_back(std::make_shared<vector<uint8_t>>(packet));
+  }
+
+  shuffle(unknown.begin(), unknown.end(), pdns::dns_random_engine());
+}
 }
 
 /*
@@ -299,7 +360,6 @@ try
 
   Netmask ecsRange;
   if (g_vm.count("ecs")) {
-    dns_random_init("0123456789abcdef");
 
     try {
       ecsRange = Netmask(g_vm["ecs"].as<string>());
@@ -332,59 +392,16 @@ try
   }
 #endif
 
-  ifstream ifs(g_vm["query-file"].as<string>());
-  string line;
   reportAllTypes();
-  vector<std::shared_ptr<vector<uint8_t> > > unknown, known;
-  std::vector<std::string> fields;
-  fields.reserve(3);
+  vector<std::shared_ptr<vector<uint8_t>>> unknown;
+  vector<std::shared_ptr<vector<uint8_t>>> known;
+  parseQueryFile(g_vm["query-file"].as<string>(), unknown, useECSFromFile, wantRecursion, !ecsRange.empty());
 
-  while(getline(ifs, line)) {
-    vector<uint8_t> packet;
-    DNSPacketWriter::optvect_t ednsOptions;
-    boost::trim(line);
-    if (line.empty() || line.at(0) == '#') {
-      continue;
-    }
-
-    fields.clear();
-    stringtok(fields, line, "\t ");
-    if ((useECSFromFile && fields.size() < 3) || fields.size() < 2) {
-      cerr<<"Skipping invalid line '"<<line<<", it does not contain enough values"<<endl;
-      continue;
-    }
-
-    const std::string& qname = fields.at(0);
-    const std::string& qtype = fields.at(1);
-    std::string subnet;
-
-    if (useECSFromFile) {
-      subnet = fields.at(2);
-    }
-
-    DNSPacketWriter pw(packet, DNSName(qname), DNSRecordContent::TypeToNumber(qtype));
-    pw.getHeader()->rd=wantRecursion;
-    pw.getHeader()->id=dns_random_uint16();
-
-    if(!subnet.empty() || !ecsRange.empty()) {
-      EDNSSubnetOpts opt;
-      opt.source = Netmask(subnet.empty() ? "0.0.0.0/32" : subnet);
-      ednsOptions.emplace_back(EDNSOptionCode::ECS, makeEDNSSubnetOptsString(opt));
-    }
-
-    if(!ednsOptions.empty() || pw.getHeader()->id % 2) {
-      pw.addOpt(1500, 0, EDNSOpts::DNSSECOK, ednsOptions);
-      pw.commit();
-    }
-    unknown.push_back(std::make_shared<vector<uint8_t>>(packet));
-  }
-
-  shuffle(unknown.begin(), unknown.end(), pdns::dns_random_engine());
   if (!g_quiet) {
     cout<<"Generated "<<unknown.size()<<" ready to use queries"<<endl;
   }
   
-  vector<std::unique_ptr<Socket>> sockets;
+  auto sockets = std::make_shared<std::vector<std::unique_ptr<Socket>>>();
   ComboAddress dest;
   try {
     dest = ComboAddress(g_vm["destination"].as<string>(), 53);
@@ -413,9 +430,14 @@ try
       }
     }
 
-    sockets.push_back(std::move(sock));
+    sockets->push_back(std::move(sock));
   }
-  new thread(recvThread, &sockets);
+
+  {
+    std::thread receiver(recvThread, sockets);
+    receiver.detach();
+  }
+
   uint32_t qps;
 
   ofstream plot;
@@ -466,7 +488,7 @@ try
     DTime dt;
     dt.set();
 
-    sendPackets(sockets, toSend, qps, dest, ecsRange);
+    sendPackets(*sockets, toSend, qps, dest, ecsRange);
     
     const auto udiff = dt.udiffNoReset();
     const auto realqps=toSend.size()/(udiff/1000000.0);
@@ -518,8 +540,13 @@ try
 
   // t1.detach();
 }
- catch(std::exception& e)
+catch (const std::exception& exp)
 {
-  cerr<<"Fatal error: "<<e.what()<<endl;
+  cerr<<"Fatal error: "<<exp.what()<<endl;
+  return EXIT_FAILURE;
+}
+catch (const NetmaskException& exp)
+{
+  cerr<<"Fatal error: "<<exp.reason<<endl;
   return EXIT_FAILURE;
 }

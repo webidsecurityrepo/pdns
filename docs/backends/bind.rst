@@ -53,7 +53,10 @@ It supports the following blocks and directives:
    * ``file``
    * ``type``
    * ``masters``
+   * ``primaries`` (added in version 4.9.0)
    * ``also-notify``
+
+Unknown directives will be ignored.
 
 .. _setting-bind-check-interval:
 
@@ -117,7 +120,6 @@ The file must contain one IP and account per line, separated by whitespace.
 
 BIND backend can only read this file, not write it.
 
-
 .. _setting-bind-supermaster-config:
 
 ``bind-supermaster-config``
@@ -126,6 +128,14 @@ BIND backend can only read this file, not write it.
 When a new zone is configured via the autosecondary mechanism, bindbackend *writes* a zone entry to this file.
 
 Your ``bind-config`` file should have an ``include`` statement to make sure this file is read on startup.
+
+.. _setting-bind-supermaster-destdir:
+
+``bind-supermaster-destdir``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each new zone configured via the autosecondary mechanism gets a zone file in this directory.
+This directory must be writable.
 
 .. _bind-operation:
 

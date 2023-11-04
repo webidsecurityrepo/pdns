@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-upload-docs:
     name: Build and upload docs
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: PowerDNS/pdns/set-ubuntu-mirror@meta
       - uses: actions/checkout@v3
@@ -22,7 +22,8 @@ jobs:
       - run: inv install-doc-deps-pdf
 
       - id: get-version
-        run: echo "pdns_version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: |
+          echo "pdns_version=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - id: setup-ssh
         run: |-
@@ -58,6 +59,8 @@ jobs:
         if: ${{github.ref_name == 'master' && steps.setup-ssh.outputs.have_ssh_key != ''}}
 
       # Rec
+      - run: inv ci-docs-rec-generate
+        working-directory: ./pdns/recursordist/settings
       - run: inv ci-docs-build
         working-directory: ./pdns/recursordist
       - run: mv html rec-html-docs

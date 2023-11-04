@@ -122,6 +122,9 @@ Listen Sockets
      ``certFile`` now accepts a TLSCertificate object or a list of such objects (see :func:`newTLSCertificate`)
      ``additionalAddresses``, ``ignoreTLSConfigurationErrors`` and ``keepIncomingHeaders`` options added.
 
+  .. versionchanged:: 1.9.0
+     ``library``, ``readAhead`` and ``proxyProtocolOutsideTLS`` options added.
+
   Listen on the specified address and TCP port for incoming DNS over HTTPS connections, presenting the specified X.509 certificate.
   If no certificate (or key) files are specified, listen for incoming DNS over HTTP connections instead.
 
@@ -141,7 +144,7 @@ Listen Sockets
   * ``idleTimeout=30``: int - Set the idle timeout, in seconds.
   * ``ciphers``: str - The TLS ciphers to use, in OpenSSL format. Ciphers for TLS 1.3 must be specified via ``ciphersTLS13``.
   * ``ciphersTLS13``: str - The TLS ciphers to use for TLS 1.3, in OpenSSL format.
-  * ``serverTokens``: str - The content of the Server: HTTP header returned by dnsdist. The default is "h2o/dnsdist".
+  * ``serverTokens``: str - The content of the Server: HTTP header returned by dnsdist. The default is "h2o/dnsdist" when ``h2o`` is used, "nghttp2-<version>/dnsdist" when ``nghttp2`` is.
   * ``customResponseHeaders={}``: table - Set custom HTTP header(s) returned by dnsdist.
   * ``ocspResponses``: list - List of files containing OCSP responses, in the same order than the certificates and keys, that will be used to provide OCSP stapling responses.
   * ``minTLSVersion``: str - Minimum version of the TLS protocol to support. Possible values are 'tls1.0', 'tls1.1', 'tls1.2' and 'tls1.3'. Default is to require at least TLS 1.0.
@@ -164,6 +167,32 @@ Listen Sockets
   * ``keepIncomingHeaders``: bool - Whether to retain the incoming headers in memory, to be able to use :func:`HTTPHeaderRule` or :meth:`DNSQuestion.getHTTPHeaders`. Default is false. Before 1.8.0 the headers were always kept in-memory.
   * ``additionalAddresses``: list - List of additional addresses (with port) to listen on. Using this option instead of creating a new frontend for each address avoids the creation of new thread and Frontend objects, reducing the memory usage. The drawback is that there will be a single set of metrics for all addresses.
   * ``ignoreTLSConfigurationErrors=false``: bool - Ignore TLS configuration errors (such as invalid certificate path) and just issue a warning instead of aborting the whole process
+  * ``library``: str - Which underlying HTTP2 library should be used, either h2o or nghttp2. Until 1.9.0 only h2o was available, but the use of this library is now deprecated as it is no longer maintained. nghttp2 is the new default since 1.9.0.
+  * ``readAhead``: bool - When the TLS provider is set to OpenSSL, whether we tell the library to read as many input bytes as possible, which leads to better performance by reducing the number of syscalls. Default is true.
+  * ``proxyProtocolOutsideTLS``: bool - When the use of incoming proxy protocol is enabled, whether the payload is prepended after the start of the TLS session (so inside, meaning it is protected by the TLS layer providing encryption and authentication) or not (outside, meaning it is in clear-text). Default is false which means inside. Note that most third-party software like HAproxy expect the proxy protocol payload to be outside, in clear-text.
+
+.. function:: addDOQLocal(address, certFile(s), keyFile(s) [, options])
+
+  .. versionadded:: 1.9.0
+
+  Listen on the specified address and UDP port for incoming DNS over QUIC connections, presenting the specified X.509 certificate.
+
+  :param str address: The IP Address with an optional port to listen on.
+                      The default port is 853.
+  :param str certFile(s): The path to a X.509 certificate file in PEM format, a list of paths to such files, or a TLSCertificate object.
+  :param str keyFile(s): The path to the private key file corresponding to the certificate, or a list of paths to such files, whose order should match the certFile(s) ones. Ignored if ``certFile`` contains TLSCertificate objects.
+  :param table options: A table with key: value pairs with listen options.
+
+  Options:
+
+  * ``reusePort=false``: bool - Set the ``SO_REUSEPORT`` socket option.
+  * ``interface=""``: str - Set the network interface to use.
+  * ``cpus={}``: table - Set the CPU affinity for this listener thread, asking the scheduler to run it on a single CPU id, or a set of CPU ids. This parameter is only available if the OS provides the pthread_setaffinity_np() function.
+  * ``idleTimeout=5``: int - Set the idle timeout, in seconds.
+  * ``internalPipeBufferSize=0``: int - Set the size in bytes of the internal buffer of the pipes used internally to pass queries and responses between threads. Requires support for ``F_SETPIPE_SZ`` which is present in Linux since 2.6.35. The actual size might be rounded up to a multiple of a page size. 0 means that the OS default size is used. The default value is 0, except on Linux where it is 1048576 since 1.6.0.
+  * ``maxInFlight=0``: int - Maximum number of in-flight queries. The default is 0, which disables out-of-order processing.
+  * ``congestionControlAlgo="reno"``: str - The congestion control algorithm to be chosen between ``reno``, ``cubic`` and ``bbr``.
+  * ``keyLogFile``: str - Write the TLS keys in the specified file so that an external program can decrypt TLS exchanges, in the format described in https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/Key_Log_Format.
 
 .. function:: addTLSLocal(address, certFile(s), keyFile(s) [, options])
 
@@ -178,6 +207,8 @@ Listen Sockets
   .. versionchanged:: 1.8.0
      ``certFile`` now accepts a TLSCertificate object or a list of such objects (see :func:`newTLSCertificate`).
      ``additionalAddresses``, ``ignoreTLSConfigurationErrors`` and ``ktls`` options added.
+  .. versionchanged:: 1.9.0
+     ``readAhead`` and ``proxyProtocolOutsideTLS`` options added.
 
   Listen on the specified address and TCP port for incoming DNS over TLS connections, presenting the specified X.509 certificate.
 
@@ -215,6 +246,8 @@ Listen Sockets
   * ``additionalAddresses``: list - List of additional addresses (with port) to listen on. Using this option instead of creating a new frontend for each address avoids the creation of new thread and Frontend objects, reducing the memory usage. The drawback is that there will be a single set of metrics for all addresses.
   * ``ignoreTLSConfigurationErrors=false``: bool - Ignore TLS configuration errors (such as invalid certificate path) and just issue a warning instead of aborting the whole process
   * ``ktls=false``: bool - Whether to enable the experimental kernel TLS support on Linux, if both the kernel and the OpenSSL library support it. Default is false.
+  * ``readAhead``: bool - When the TLS provider is set to OpenSSL, whether we tell the library to read as many input bytes as possible, which leads to better performance by reducing the number of syscalls. Default is true.
+  * ``proxyProtocolOutsideTLS``: bool - When the use of incoming proxy protocol is enabled, whether the payload is prepended after the start of the TLS session (so inside, meaning it is protected by the TLS layer providing encryption and authentication) or not (outside, meaning it is in clear-text). Default is false which means inside. Note that most third-party software like HAproxy expect the proxy protocol payload to be outside, in clear-text.
 
 .. function:: setLocal(address[, options])
 
@@ -333,7 +366,7 @@ Webserver configuration
     The ``password`` parameter is now optional.
     The use of optional parameters is now deprecated. Please use :func:`setWebserverConfig` instead.
 
-  .. versionchanged:: 1.7.0
+  .. versionchanged:: 1.8.0
     The ``password``, ``apikey``, ``customHeaders`` and ``acl`` parameters is no longer supported.
     Please use :func:`setWebserverConfig` instead.
 
@@ -469,11 +502,11 @@ Access Control Lists
 
   .. versionadded:: 1.6.0
 
-  Set the list of netmasks from which a Proxy Protocol header will be accepted, over UDP, TCP and DNS over TLS. The default is empty. Note that, if :func:`setProxyProtocolApplyACLToProxiedClients` is set (default is false), the general ACL will be applied to the source IP address as seen by dnsdist first, but also to the source IP address provided in the Proxy Protocol header.
+  Set the list of netmasks from which a Proxy Protocol header will be required, over UDP, TCP and DNS over TLS. The default is empty. Note that a proxy protocol payload will be required from these clients, regular DNS queries will no longer be accepted if they are not preceded by a proxy protocol payload. Be also aware that, if :func:`setProxyProtocolApplyACLToProxiedClients` is set (default is false), the general ACL will be applied to the source IP address as seen by dnsdist first, but also to the source IP address provided in the Proxy Protocol header.
 
   :param {str} netmasks: A table of CIDR netmask, e.g. ``{"192.0.2.0/24", "2001:DB8:14::/56"}``. Without a subnetmask, only the specific address is allowed.
 
-.. function:: setProxyProtocolApplyACL(apply)
+.. function:: setProxyProtocolApplyACLToProxiedClients(apply)
 
   .. versionadded:: 1.6.0
 
@@ -605,7 +638,7 @@ Servers
                                                  --   "address@interface", e.g. "192.0.2.2@eth0"
       addXPF=NUM,                                -- Add the client's IP address and port to the query, along with the original destination address and port,
                                                  -- using the experimental XPF record from `draft-bellis-dnsop-xpf <https://datatracker.ietf.org/doc/draft-bellis-dnsop-xpf/>`_ and the specified option code. Default is disabled (0). This is a deprecated feature that will be removed in the near future.
-      sockets=NUM,                               -- Number of UDP sockets (and thus source ports) used toward the backend server, defaults to a single one. Note that for backends which are multithreaded, this setting will have an effect on the number of cores that will be used to process traffic from dnsdist. For example you may want to set 'sockets' to a number somewhat higher than the number of worker threads configured in the backend, particularly if the Linux kernel is being used to distribute traffic to multiple threads listening on the same socket (via `reuseport`).
+      sockets=NUM,                               -- Number of UDP sockets (and thus source ports) used toward the backend server, defaults to a single one. Note that for backends which are multithreaded, this setting will have an effect on the number of cores that will be used to process traffic from dnsdist. For example you may want to set 'sockets' to a number somewhat higher than the number of worker threads configured in the backend, particularly if the Linux kernel is being used to distribute traffic to multiple threads listening on the same socket (via `reuseport`). See also :func:`setRandomizedOutgoingSockets`.
       disableZeroScope=BOOL,                     -- Disable the EDNS Client Subnet 'zero scope' feature, which does a cache lookup for an answer valid for all subnets (ECS scope of 0) before adding ECS information to the query and doing the regular lookup. This requires the ``parseECS`` option of the corresponding cache to be set to true
       rise=NUM,                                  -- Require NUM consecutive successful checks before declaring the backend up, default: 1
       useProxyProtocol=BOOL,                     -- Add a proxy protocol header to the query, passing along the client's IP address and port along with the original destination address and port. Default is disabled.
@@ -1138,8 +1171,11 @@ Status, Statistics and More
 
   :param int top: How many rules to return. Default is 10.
 
-.. function:: grepq(selector[, num])
-              grepq(selectors[, num])
+.. function:: grepq(selector[, num [, options]])
+              grepq(selectors[, num [, options]])
+
+  .. versionchanged:: 1.9.0
+    ``options`` optional parameter table added.
 
   Prints the last ``num`` queries and responses matching ``selector`` or ``selectors``.
   Queries and responses are accounted in separate ring buffers, and answers from the packet cache are not stored in the response ring buffer.
@@ -1153,7 +1189,12 @@ Status, Statistics and More
 
   :param str selector: Select queries based on this property.
   :param {str} selectors: A lua table of selectors. Only queries matching all selectors are shown
-  :param int num: Show a maximum of ``num`` recent queries+responses, default is 10.
+  :param int num: Show a maximum of ``num`` recent queries+responses.
+  :param table options: A table with key: value pairs with options described below.
+
+  Options:
+
+  * ``outputFile=path``: string - Write the output of the command to the supplied file, instead of the standard output.
 
 .. function:: setVerbose(verbose)
 
@@ -1201,6 +1242,12 @@ Status, Statistics and More
   .. versionadded:: 1.4.0
 
   Print the HTTP response codes statistics for all available DNS over HTTPS frontends.
+
+.. function:: showDOQFrontends()
+
+  .. versionadded:: 1.9.0
+
+  Print the list of all available DNS over QUIC frontends.
 
 .. function:: showResponseLatency()
 
@@ -1364,6 +1411,7 @@ Dynamic Blocks
 
   Block a set of addresses with ``message`` for (optionally) a number of seconds.
   The default number of seconds to block for is 10.
+  Since 1.3.0, the use of a :ref:`DynBlockRulesGroup` is a much more efficient way of doing the same thing.
 
   :param addresses: set of Addresses as returned by an exceed function
   :param string message: The message to show next to the blocks
@@ -1549,7 +1597,7 @@ faster than the existing rules.
     .. versionchanged:: 1.7.0
       This visitor function can now optionally return an additional string which will be set as the ``reason`` for the dynamic block.
 
-    Set a Lua visitor function that will be called for each label of every domain seen in queries and responses. The function receives a `StatNode` object representing the stats of the parent, a second one with the stats of the current label and one with the stats of the current node plus all its children.
+    Set a Lua visitor function that will be called for each label of every domain seen in queries and responses. The function receives a :class:`StatNode` object representing the stats of the parent, a :class:`StatNodeStats` one with the stats of the current label and a second :class:`StatNodeStats` with the stats of the current node plus all its children.
     Note that this function will not be called if a FFI version has been set using :meth:`DynBlockRulesGroup:setSuffixMatchRuleFFI`
     If the function returns true, the current label will be blocked according to the `seconds`, `reason`, `blockingTime` and `action` parameters. Since 1.7.0, the function can return an additional string, in addition to the boolean, which will be set as the ``reason`` for the dynamic block.
     Selected domains can be excluded from this processing using the :meth:`DynBlockRulesGroup:excludeDomains` method.
@@ -1623,43 +1671,53 @@ StatNode
 
 .. class:: StatNode
 
-  Represent metrics about a given node, for the visitor functions used with :meth:`DynBlockRulesGroup:setSuffixMatchRule` and :meth:`DynBlockRulesGroup:setSuffixMatchRuleFFI`. Note that some nodes includes the metrics for their children as well as their own.
-
-  .. attribute:: StatNode.bytes
-
-    The number of bytes for all responses returned for that node.
-
-  .. attribute:: StatNode.drops
-
-    The number of drops for that node.
+  Represent a given node, for the visitor functions used with :meth:`DynBlockRulesGroup:setSuffixMatchRule` and :meth:`DynBlockRulesGroup:setSuffixMatchRuleFFI`.
 
   .. attribute:: StatNode.fullname
 
-    The complete name of that node, ie 'www.powerdns.com'.
+    The complete name of that node, ie 'www.powerdns.com.'.
 
   .. attribute:: StatNode.labelsCount
 
-    The number of labels in that node, for example 3 for 'www.powerdns.com'.
-
-  .. attribute:: StatNode.noerrors
-
-    The number of No Error answers returned for that node.
-
-  .. attribute:: StatNode.nxdomains
-
-    The number of NXDomain answers returned for that node.
-
-  .. attribute:: StatNode.queries
-
-    The number of queries for that node.
-
-  .. attribute:: StatNode.servfails
-
-    The number of Server Failure answers returned for that node.
+    The number of labels in that node, for example 3 for 'www.powerdns.com.'.
 
   .. method:: StatNode:numChildren
 
     The number of children of that node.
+
+.. class:: StatNodeStats
+
+  Represent the metrics for a given node, for the visitor functions used with :meth:`DynBlockRulesGroup:setSuffixMatchRule` and :meth:`DynBlockRulesGroup:setSuffixMatchRuleFFI`.
+
+  .. attribute:: StatNodeStats.bytes
+
+    The number of bytes for all responses returned for that node.
+
+  .. attribute:: StatNodeStats.drops
+
+    The number of drops for that node.
+
+  .. attribute:: StatNodeStats.noerrors
+
+    The number of No Error answers returned for that node.
+
+  .. attribute:: StatNodeStats.hits
+
+    .. versionadded:: 1.8.0
+
+    The number of cache hits for that node.
+
+  .. attribute:: StatNodeStats.nxdomains
+
+    The number of NXDomain answers returned for that node.
+
+  .. attribute:: StatNodeStats.queries
+
+    The number of queries for that node.
+
+  .. attribute:: StatNodeStats.servfails
+
+    The number of Server Failure answers returned for that node.
 
 SuffixMatchNode
 ~~~~~~~~~~~~~~~
@@ -1877,18 +1935,18 @@ Other functions
 
   PKCS12 files are only supported by the ``openssl`` provider, password-protected or not.
 
-  :param string pathToCert: Path to a file containing the certificate or a PCKS12 file containing both a certificate and a key.
+  :param string pathToCert: Path to a file containing the certificate or a PKCS12 file containing both a certificate and a key.
   :param table options: A table with key: value pairs with additional options.
 
   Options:
 
   * ``key="path/to/key"``: string - Path to a file containing the key corresponding to the certificate.
-  * ``password="pass"``: string - Password protecting the PCKS12 file if appropriate.
+  * ``password="pass"``: string - Password protecting the PKCS12 file if appropriate.
 
   .. code-block:: lua
 
     newTLSCertificate("path/to/pub.crt", {key="path/to/private.pem"})
-    newTLSCertificate("path/to/domain.p12", {password="passphrase"}) -- use a password protected PCKS12 file
+    newTLSCertificate("path/to/domain.p12", {password="passphrase"}) -- use a password protected PKCS12 file
 
 DOHFrontend
 ~~~~~~~~~~~

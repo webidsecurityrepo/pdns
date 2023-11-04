@@ -69,7 +69,8 @@ export LDFLAGS=-L/usr/lib64/boost169
     --with-libsodium \
     --with-net-snmp \
 %endif
-    --enable-systemd --with-systemd=%{_unitdir}
+    --enable-systemd --with-systemd=%{_unitdir} \
+    --enable-nod
 
 make %{?_smp_mflags}
 
@@ -124,4 +125,5 @@ systemctl daemon-reload ||:
 %dir %{_sysconfdir}/%{name}
 %dir %{_sysconfdir}/%{name}/recursor.d
 %config(noreplace) %{_sysconfdir}/%{name}/recursor.conf
+%config %{_sysconfdir}/%{name}/recursor.yml-dist
 %doc README

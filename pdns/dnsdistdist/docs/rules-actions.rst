@@ -169,11 +169,61 @@ For Rules related to the incoming query:
 
   Remove all current rules.
 
-.. function:: getAction(n) -> Action
+.. function:: getAction(n) -> DNSDistRuleAction
 
-  Returns the Action associated with rule ``n``.
+  Returns the :class:`DNSDistRuleAction` associated with rule ``n``.
 
   :param int n: The rule number
+
+.. function:: getCacheHitResponseRule(selector) -> DNSDistResponseRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Return the cache-hit response rule corresponding to the selector, if any.
+  The selector can be the position of the rule in the list, as an integer,
+  its name as a string or its UUID as a string as well.
+
+  :param int or str selector: The position in the list, name or UUID of the rule to return.
+
+.. function:: getCacheInsertedResponseRule(selector) -> DNSDistResponseRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Return the cache-inserted response rule corresponding to the selector, if any.
+  The selector can be the position of the rule in the list, as an integer,
+  its name as a string or its UUID as a string as well.
+
+  :param int or str selector: The position in the list, name or UUID of the rule to return.
+
+.. function:: getResponseRule(selector) -> DNSDistResponseRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Return the response rule corresponding to the selector, if any.
+  The selector can be the position of the rule in the list, as an integer,
+  its name as a string or its UUID as a string as well.
+
+  :param int or str selector: The position in the list, name or UUID of the rule to return.
+
+.. function:: getRule(selector) -> DNSDistRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Return the rule corresponding to the selector, if any.
+  The selector can be the position of the rule in the list, as an integer,
+  its name as a string or its UUID as a string as well.
+
+  :param int or str selector: The position in the list, name or UUID of the rule to return.
+
+.. function:: getSelfAnsweredResponseRule(selector) -> DNSDistResponseRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Return the self-answered response rule corresponding to the selector, if any.
+  The selector can be the position of the rule in the list, as an integer,
+  its name as a string or its UUID as a string as well.
+
+  :param int or str selector: The position in the list, name or UUID of the rule to return.
 
 .. function:: mvRule(from, to)
 
@@ -781,7 +831,8 @@ These ``DNSRule``\ s be one of the following items:
   sense for DoT or DoH, and for that last one matching on the HTTP Host header using :func:`HTTPHeaderRule`
   might provide more consistent results.
   As of the version 2.3.0-beta of h2o, it is unfortunately not possible to extract the SNI value from DoH
-  connections, and it is therefore necessary to use the HTTP Host header until version 2.3.0 is released.
+  connections, and it is therefore necessary to use the HTTP Host header until version 2.3.0 is released,
+  or ``nghttp2`` is used for incoming DoH instead (1.9.0+).
 
   :param str name: The exact SNI name to match.
 
@@ -911,7 +962,7 @@ The following actions exist.
 
   Removes given type(s) records from the response. Beware you can accidentally turn the answer into a NODATA response
   without a SOA record in the additional section in which case you may want to use :func:`NegativeAndSOAAction` to generate an answer,
-  see example bellow.
+  see example below.
   Subsequent rules are processed after this action.
 
   .. code-block:: Lua
@@ -1291,7 +1342,7 @@ The following actions exist.
 
   :param int maxqps: The QPS limit
 
-.. function:: QPSPoolAction(maxqps, poolname)
+.. function:: QPSPoolAction(maxqps, poolname [, stop])
 
   .. versionchanged:: 1.8.0
     Added the ``stop`` optional parameter.
@@ -1369,6 +1420,9 @@ The following actions exist.
     ``metas`` optional parameter added.
     ``exportTags`` optional key added to the options table.
 
+  .. versionchanged:: 1.9.0
+    ``exportExtendedErrorsToMeta`` optional key added to the options table.
+
   Send the content of this response to a remote logger via Protocol Buffer.
   ``alterFunction`` is the same callback that receiving a :class:`DNSQuestion` and a :class:`DNSDistProtoBufMessage`, that can be used to modify the Protocol Buffer content, for example for anonymization purposes.
   ``includeCNAME`` indicates whether CNAME records inside the response should be parsed and exported.
@@ -1387,6 +1441,7 @@ The following actions exist.
   * ``serverID=""``: str - Set the Server Identity field.
   * ``ipEncryptKey=""``: str - A key, that can be generated via the :func:`makeIPCipherKey` function, to encrypt the IP address of the requestor for anonymization purposes. The encryption is done using ipcrypt for IPv4 and a 128-bit AES ECB operation for IPv6.
   * ``exportTags=""``: str - The comma-separated list of keys of internal tags to export into the ``tags`` Protocol Buffer field, as "key:value" strings. Note that a tag with an empty value will be exported as "<key>", not "<key>:". An empty string means that no internal tag will be exported. The special value ``*`` means that all tags will be exported.
+  * ``exportExtendedErrorsToMeta=""``: str - Export Extended DNS Errors present in the DNS response, if any, into the ``meta`` Protocol Buffer field using the specified ``key``. The EDE info code will be exported as an integer value, and the EDE extra text, if present, as a string value.
 
 .. function:: SetAdditionalProxyProtocolValueAction(type, value)
 
@@ -1802,3 +1857,45 @@ The following actions exist.
   Subsequent rules are processed after this action.
 
   :param int ttl: Cache TTL for temporary failure replies
+
+Objects
+-------
+
+.. class:: DNSDistRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Represents a rule composed of a :class:`DNSRule` selector, to select the queries this applies to,
+  and a :class:`DNSAction` action to apply when the selector matches.
+
+  .. method:: DNSDistRuleAction:getAction()
+
+    Return the :class:`DNSAction` action of this rule.
+
+  .. method:: DNSDistRuleAction:getSelector()
+
+    Return the :class:`DNSRule` selector of this rule.
+
+.. class:: DNSDistResponseRuleAction
+
+  .. versionadded:: 1.9.0
+
+  Represents a rule composed of a :class:`DNSRule` selector, to select the responses this applies to,
+  and a :class:`DNSResponseAction` action to apply when the selector matches.
+
+  .. method:: DNSDistResponseRuleAction:getAction()
+
+    Return the :class:`DNSResponseAction` action of this rule.
+
+  .. method:: DNSDistResponseRuleAction:getSelector()
+
+    Return the :class:`DNSRule` selector of this rule.
+
+.. class:: DNSRule
+
+  .. versionadded:: 1.9.0
+
+  .. method:: DNSRule:getMatches() -> int
+
+    Return the number of times this selector matched a query or a response. Note that if the same selector is reused for different ``DNSDistRuleAction``
+    objects, the counter will be common to all these objects.

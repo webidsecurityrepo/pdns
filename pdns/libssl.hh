@@ -21,7 +21,7 @@ struct TLSCertKeyPair
   std::optional<std::string> d_key;
   std::optional<std::string> d_password;
   explicit TLSCertKeyPair(const std::string& cert, std::optional<std::string> key = std::nullopt, std::optional<std::string> password = std::nullopt):
-    d_cert(cert), d_key(key), d_password(password) {
+    d_cert(cert), d_key(std::move(key)), d_password(std::move(password)) {
   }
 };
 
@@ -53,6 +53,8 @@ public:
   bool d_asyncMode{false};
   /* enable kTLS mode, if supported */
   bool d_ktls{false};
+  /* set read ahead mode, if supported */
+  bool d_readAhead{true};
 };
 
 struct TLSErrorCounters
@@ -113,7 +115,6 @@ class OpenSSLTLSTicketKeysRing
 public:
   OpenSSLTLSTicketKeysRing(size_t capacity);
   ~OpenSSLTLSTicketKeysRing();
-  void addKey(std::shared_ptr<OpenSSLTLSTicketKey> newKey);
   std::shared_ptr<OpenSSLTLSTicketKey> getEncryptionKey();
   std::shared_ptr<OpenSSLTLSTicketKey> getDecryptionKey(unsigned char name[TLS_TICKETS_KEY_NAME_SIZE], bool& activeKey);
   size_t getKeysCount();
@@ -121,6 +122,8 @@ public:
   void rotateTicketsKey(time_t now);
 
 private:
+  void addKey(std::shared_ptr<OpenSSLTLSTicketKey>&& newKey);
+
   SharedLockGuarded<boost::circular_buffer<std::shared_ptr<OpenSSLTLSTicketKey> > > d_ticketKeys;
 };
 

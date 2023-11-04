@@ -21,6 +21,7 @@
  */
 
 #include "dnsdist.hh"
+#include "dnsdist-metrics.hh"
 #include "dnsdist-nghttp2.hh"
 #include "dnsdist-random.hh"
 #include "dnsdist-rings.hh"
@@ -37,7 +38,7 @@ bool DownstreamState::passCrossProtocolQuery(std::unique_ptr<CrossProtocolQuery>
   }
 }
 
-bool DownstreamState::reconnect()
+bool DownstreamState::reconnect(bool initialAttempt)
 {
   std::unique_lock<std::mutex> tl(connectLock, std::try_to_lock);
   if (!tl.owns_lock() || isStopped()) {
@@ -72,7 +73,6 @@ bool DownstreamState::reconnect()
 #endif
 
     if (!IsAnyAddress(d_config.sourceAddr)) {
-      SSetsockopt(fd, SOL_SOCKET, SO_REUSEADDR, 1);
 #ifdef IP_BIND_ADDRESS_NO_PORT
       if (d_config.ipBindAddrNoPort) {
         SSetsockopt(fd, SOL_IP, IP_BIND_ADDRESS_NO_PORT, 1);
@@ -89,7 +89,9 @@ bool DownstreamState::reconnect()
       connected = true;
     }
     catch (const std::runtime_error& error) {
-      infolog("Error connecting to new server with address %s: %s", d_config.remote.toStringWithPort(), error.what());
+      if (initialAttempt || g_verbose) {
+        infolog("Error connecting to new server with address %s: %s", d_config.remote.toStringWithPort(), error.what());
+      }
       connected = false;
       break;
     }
@@ -116,7 +118,34 @@ bool DownstreamState::reconnect()
     }
   }
 
+  if (connected) {
+    tl.unlock();
+    d_connectedWait.notify_all();
+    if (!initialAttempt) {
+      /* we need to be careful not to start this
+         thread too soon, as the creation should only
+         happen after the configuration has been parsed */
+      start();
+    }
+  }
+
   return connected;
+}
+
+void DownstreamState::waitUntilConnected()
+{
+  if (d_stopped) {
+    return;
+  }
+  if (connected) {
+    return;
+  }
+  {
+    std::unique_lock<std::mutex> lock(connectLock);
+    d_connectedWait.wait(lock, [this]{
+      return connected.load();
+    });
+  }
 }
 
 void DownstreamState::stop()
@@ -266,7 +295,7 @@ void DownstreamState::connectUDPSockets()
     fd = -1;
   }
 
-  reconnect();
+  reconnect(true);
 }
 
 DownstreamState::~DownstreamState()
@@ -331,10 +360,10 @@ void DownstreamState::handleUDPTimeout(IDState& ids)
 {
   ids.age = 0;
   ids.inUse = false;
-  handleDOHTimeout(std::move(ids.internal.du));
+  DOHUnitInterface::handleTimeout(std::move(ids.internal.du));
   ++reuseds;
   --outstanding;
-  ++g_stats.downstreamTimeouts; // this is an 'actively' discovered timeout
+  ++dnsdist::metrics::g_stats.downstreamTimeouts; // this is an 'actively' discovered timeout
   vinfolog("Had a downstream timeout from %s (%s) for query for %s|%s from %s",
            d_config.remote.toStringWithPort(), getName(),
            ids.internal.qname.toLogString(), QType(ids.internal.qtype).toString(), ids.internal.origRemote.toStringWithPort());
@@ -433,8 +462,8 @@ uint16_t DownstreamState::saveState(InternalQueryState&& state)
 
         auto oldDU = std::move(it->second.internal.du);
         ++reuseds;
-        ++g_stats.downstreamTimeouts;
-        handleDOHTimeout(std::move(oldDU));
+        ++dnsdist::metrics::g_stats.downstreamTimeouts;
+        DOHUnitInterface::handleTimeout(std::move(oldDU));
       }
       else {
         ++outstanding;
@@ -460,8 +489,8 @@ uint16_t DownstreamState::saveState(InternalQueryState&& state)
          to handle it because it's about to be overwritten. */
       auto oldDU = std::move(ids.internal.du);
       ++reuseds;
-      ++g_stats.downstreamTimeouts;
-      handleDOHTimeout(std::move(oldDU));
+      ++dnsdist::metrics::g_stats.downstreamTimeouts;
+      DOHUnitInterface::handleTimeout(std::move(oldDU));
     }
     else {
       ++outstanding;
@@ -483,8 +512,8 @@ void DownstreamState::restoreState(uint16_t id, InternalQueryState&& state)
     if (!inserted) {
       /* already used */
       ++reuseds;
-      ++g_stats.downstreamTimeouts;
-      handleDOHTimeout(std::move(state.du));
+      ++dnsdist::metrics::g_stats.downstreamTimeouts;
+      DOHUnitInterface::handleTimeout(std::move(state.du));
     }
     else {
       it->second.internal = std::move(state);
@@ -498,15 +527,15 @@ void DownstreamState::restoreState(uint16_t id, InternalQueryState&& state)
   if (!guard) {
     /* already used */
     ++reuseds;
-    ++g_stats.downstreamTimeouts;
-    handleDOHTimeout(std::move(state.du));
+    ++dnsdist::metrics::g_stats.downstreamTimeouts;
+    DOHUnitInterface::handleTimeout(std::move(state.du));
     return;
   }
   if (ids.isInUse()) {
     /* already used */
     ++reuseds;
-    ++g_stats.downstreamTimeouts;
-    handleDOHTimeout(std::move(state.du));
+    ++dnsdist::metrics::g_stats.downstreamTimeouts;
+    DOHUnitInterface::handleTimeout(std::move(state.du));
     return;
   }
   ids.internal = std::move(state);
@@ -671,6 +700,10 @@ void DownstreamState::updateNextLazyHealthCheck(LazyHealthCheckStats& stats, boo
 
 void DownstreamState::submitHealthCheckResult(bool initial, bool newResult)
 {
+  if (!newResult) {
+    ++d_healthCheckMetrics.d_failures;
+  }
+
   if (initial) {
     /* if this is the initial health-check, at startup, we do not care
        about the minimum number of failed/successful health-checks */
@@ -752,7 +785,6 @@ void DownstreamState::submitHealthCheckResult(bool initial, bool newResult)
 
     if (newState && !isTCPOnly() && (!connected || d_config.reconnectOnUp)) {
       newState = reconnect();
-      start();
     }
 
     setUpStatus(newState);

@@ -25,6 +25,7 @@
 
 #include "dnsdist-carbon.hh"
 #include "dnsdist.hh"
+#include "dnsdist-metrics.hh"
 
 #ifndef DISABLE_CARBON
 #include "dolog.hh"
@@ -51,21 +52,24 @@ static bool doOneCarbonExport(const Carbon::Endpoint& endpoint)
 
     const time_t now = time(nullptr);
 
-    for (const auto& e : g_stats.entries) {
-      str << namespace_name << "." << hostname << "." << instance_name << "." << e.first << ' ';
-      if (const auto& val = boost::get<pdns::stat_t*>(&e.second)) {
-        str << (*val)->load();
+    {
+      auto entries = dnsdist::metrics::g_stats.entries.read_lock();
+      for (const auto& entry : *entries) {
+        str << namespace_name << "." << hostname << "." << instance_name << "." << entry.d_name << ' ';
+        if (const auto& val = std::get_if<pdns::stat_t*>(&entry.d_value)) {
+          str << (*val)->load();
+        }
+        else if (const auto& adval = std::get_if<pdns::stat_t_trait<double>*>(&entry.d_value)) {
+          str << (*adval)->load();
+        }
+        else if (const auto& dval = std::get_if<double*>(&entry.d_value)) {
+          str << **dval;
+        }
+        else if (const auto& func = std::get_if<dnsdist::metrics::Stats::statfunction_t>(&entry.d_value)) {
+          str << (*func)(entry.d_name);
+        }
+        str << ' ' << now << "\r\n";
       }
-      else if (const auto& adval = boost::get<pdns::stat_t_trait<double>*>(&e.second)) {
-        str << (*adval)->load();
-      }
-      else if (const auto& dval = boost::get<double*>(&e.second)) {
-        str << **dval;
-      }
-      else if (const auto& func = boost::get<DNSDistStats::statfunction_t>(&e.second)) {
-        str << (*func)(e.first);
-      }
-      str << ' ' << now << "\r\n";
     }
 
     auto states = g_dstates.getLocal();
@@ -94,6 +98,12 @@ static bool doOneCarbonExport(const Carbon::Endpoint& endpoint)
       str << base << "tcpavgqueriesperconnection" << ' ' << state->tcpAvgQueriesPerConnection.load() << " " << now << "\r\n";
       str << base << "tcpavgconnectionduration" << ' ' << state->tcpAvgConnectionDuration.load() << " " << now << "\r\n";
       str << base << "tcptoomanyconcurrentconnections" << ' ' << state->tcpTooManyConcurrentConnections.load() << " " << now << "\r\n";
+      str << base << "healthcheckfailures" << ' ' << state->d_healthCheckMetrics.d_failures << " " << now << "\r\n";
+      str << base << "healthcheckfailuresparsing" << ' ' << state->d_healthCheckMetrics.d_parseErrors << " " << now << "\r\n";
+      str << base << "healthcheckfailurestimeout" << ' ' << state->d_healthCheckMetrics.d_timeOuts << " " << now << "\r\n";
+      str << base << "healthcheckfailuresnetwork" << ' ' << state->d_healthCheckMetrics.d_networkErrors << " " << now << "\r\n";
+      str << base << "healthcheckfailuresmismatch" << ' ' << state->d_healthCheckMetrics.d_mismatchErrors << " " << now << "\r\n";
+      str << base << "healthcheckfailuresinvalid" << ' ' << state->d_healthCheckMetrics.d_invalidResponseErrors << " " << now << "\r\n";
     }
 
     std::map<std::string, uint64_t> frontendDuplicates;
@@ -116,7 +126,7 @@ static bool doOneCarbonExport(const Carbon::Endpoint& endpoint)
       str << base << "tcpdiedreadingquery" << ' ' << front->tcpDiedReadingQuery.load() << " " << now << "\r\n";
       str << base << "tcpdiedsendingresponse" << ' ' << front->tcpDiedSendingResponse.load() << " " << now << "\r\n";
       str << base << "tcpgaveup" << ' ' << front->tcpGaveUp.load() << " " << now << "\r\n";
-      str << base << "tcpclientimeouts" << ' ' << front->tcpClientTimeouts.load() << " " << now << "\r\n";
+      str << base << "tcpclienttimeouts" << ' ' << front->tcpClientTimeouts.load() << " " << now << "\r\n";
       str << base << "tcpdownstreamtimeouts" << ' ' << front->tcpDownstreamTimeouts.load() << " " << now << "\r\n";
       str << base << "tcpcurrentconnections" << ' ' << front->tcpCurrentConnections.load() << " " << now << "\r\n";
       str << base << "tcpmaxconcurrentconnections" << ' ' << front->tcpMaxConcurrentConnections.load() << " " << now << "\r\n";
@@ -137,7 +147,7 @@ static bool doOneCarbonExport(const Carbon::Endpoint& endpoint)
         errorCounters = &front->tlsFrontend->d_tlsCounters;
       }
       else if (front->dohFrontend != nullptr) {
-        errorCounters = &front->dohFrontend->d_tlsCounters;
+        errorCounters = &front->dohFrontend->d_tlsContext.d_tlsCounters;
       }
       if (errorCounters != nullptr) {
         str << base << "tlsdhkeytoosmall" << ' ' << errorCounters->d_dhKeyTooSmall << " " << now << "\r\n";
@@ -194,7 +204,7 @@ static bool doOneCarbonExport(const Carbon::Endpoint& endpoint)
       std::map<std::string, uint64_t> dohFrontendDuplicates;
       const string base = "dnsdist." + hostname + ".main.doh.";
       for (const auto& doh : g_dohlocals) {
-        string name = doh->d_local.toStringWithPort();
+        string name = doh->d_tlsContext.d_addr.toStringWithPort();
         boost::replace_all(name, ".", "_");
         boost::replace_all(name, ":", "_");
         boost::replace_all(name, "[", "_");
@@ -282,7 +292,7 @@ static void carbonHandler(Carbon::Endpoint&& endpoint)
           usleep(toSleepUSec);
         }
         else {
-          vinfolog("Carbon export for %s took longer (%s usec) than the configured interval (%d usec)", endpoint.server.toStringWithPort(), elapsedUSec, intervalUSec);
+          vinfolog("Carbon export for %s took longer (%s us) than the configured interval (%d us)", endpoint.server.toStringWithPort(), elapsedUSec, intervalUSec);
         }
         consecutiveFailures = 0;
       }

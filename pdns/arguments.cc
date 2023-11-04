@@ -35,126 +35,119 @@
 #include <unistd.h>
 #include <climits>
 
-const ArgvMap::param_t::const_iterator ArgvMap::begin()
+ArgvMap::param_t::const_iterator ArgvMap::begin()
 {
   return d_params.begin();
 }
 
-const ArgvMap::param_t::const_iterator ArgvMap::end()
+ArgvMap::param_t::const_iterator ArgvMap::end()
 {
   return d_params.end();
 }
 
-string & ArgvMap::set(const string &var)
+string& ArgvMap::set(const string& var)
 {
   return d_params[var];
 }
 
-void ArgvMap::setDefault(const string &var, const string &value)
+void ArgvMap::setDefault(const string& var, const string& value)
 {
-  if(! defaultmap.count(var))
+  if (defaultmap.count(var) == 0) {
     defaultmap.insert(pair<string, string>(var, value));
+  }
 }
 
 void ArgvMap::setDefaults()
 {
-  for (const auto& i: d_params)
-    if(! defaultmap.count(i.first))
-      defaultmap.insert(i);
+  for (const auto& param : d_params) {
+    if (defaultmap.count(param.first) == 0) {
+      defaultmap.insert(param);
+    }
+  }
 }
 
-bool ArgvMap::mustDo(const string &var)
+bool ArgvMap::mustDo(const string& var)
 {
-  return ((*this)[var]!="no") && ((*this)[var]!="off");
+  return ((*this)[var] != "no") && ((*this)[var] != "off");
 }
 
-vector<string>ArgvMap::list()
+vector<string> ArgvMap::list()
 {
   vector<string> ret;
-  for (const auto& i: d_params)
-    ret.push_back(i.first);
+  ret.reserve(d_params.size());
+  for (const auto& param : d_params) {
+    ret.push_back(param.first);
+  }
   return ret;
 }
 
-string ArgvMap::getHelp(const string &item)
+string& ArgvMap::set(const string& var, const string& help)
 {
-  return helpmap[item];
-}
-
-string & ArgvMap::set(const string &var, const string &help)
-{
-  helpmap[var]=help;
-  d_typeMap[var]="Parameter";
+  helpmap[var] = help;
+  d_typeMap[var] = "Parameter";
   return set(var);
 }
 
-void ArgvMap::setCmd(const string &var, const string &help)
+void ArgvMap::setCmd(const string& var, const string& help)
 {
-  helpmap[var]=help;
-  d_typeMap[var]="Command";
-  set(var)="no";
+  helpmap[var] = help;
+  d_typeMap[var] = "Command";
+  set(var) = "no";
 }
 
-string & ArgvMap::setSwitch(const string &var, const string &help)
+string& ArgvMap::setSwitch(const string& var, const string& help)
 {
-  helpmap[var]=help;
-  d_typeMap[var]="Switch";
+  helpmap[var] = help;
+  d_typeMap[var] = "Switch";
   return set(var);
 }
 
-
-bool ArgvMap::contains(const string &var, const string &val)
+bool ArgvMap::contains(const string& var, const string& val)
 {
   const auto& param = d_params.find(var);
-  if(param == d_params.end() || param->second.empty())  {
+  if (param == d_params.end() || param->second.empty()) {
     return false;
   }
   vector<string> parts;
 
   stringtok(parts, param->second, ", \t");
-  for (const auto& part: parts) {
-    if (part == val) {
-      return true;
-    }
-  }
-
-  return false;
+  return std::any_of(parts.begin(), parts.end(), [&](const std::string& str) { return str == val; });
 }
 
 string ArgvMap::helpstring(string prefix)
 {
-  if(prefix=="no")
-    prefix="";
+  if (prefix == "no") {
+    prefix = "";
+  }
 
   string help;
 
-  for (const auto& i: helpmap) {
-      if(!prefix.empty() && i.first.find(prefix) != 0) // only print items with prefix
-          continue;
-
-      help+="  --";
-      help+=i.first;
-
-      string type=d_typeMap[i.first];
-
-      if(type=="Parameter")
-        help+="=...";
-      else if(type=="Switch")
-        {
-          help+=" | --"+i.first+"=yes";
-          help+=" | --"+i.first+"=no";
-        }
-
-
-      help+="\n\t";
-      help+=i.second;
-      help+="\n";
-
+  for (const auto& helpitem : helpmap) {
+    if (!prefix.empty() && helpitem.first.find(prefix) != 0) { // only print items with prefix
+      continue;
     }
+
+    help += "  --";
+    help += helpitem.first;
+
+    string type = d_typeMap[helpitem.first];
+
+    if (type == "Parameter") {
+      help += "=...";
+    }
+    else if (type == "Switch") {
+      help += " | --" + helpitem.first + "=yes";
+      help += " | --" + helpitem.first + "=no";
+    }
+
+    help += "\n\t";
+    help += helpitem.second;
+    help += "\n";
+  }
   return help;
 }
 
-const string ArgvMap::formatOne(bool running, bool full, const string &var, const string &help, const string& theDefault, const string& current)
+string ArgvMap::formatOne(bool running, bool full, const string& var, const string& help, const string& theDefault, const string& current)
 {
   string out;
 
@@ -165,13 +158,14 @@ const string ArgvMap::formatOne(bool running, bool full, const string &var, cons
     out += "\t";
     out += help;
     out += "\n#\n";
-  } else {
+  }
+  else {
     if (theDefault == current) {
       return "";
     }
   }
 
-  if (! running || theDefault == current) {
+  if (!running || theDefault == current) {
     out += "# ";
   }
 
@@ -180,7 +174,8 @@ const string ArgvMap::formatOne(bool running, bool full, const string &var, cons
     if (full) {
       out += "\n";
     }
-  } else {
+  }
+  else {
     out += var + "=" + theDefault + "\n\n";
   }
 
@@ -192,175 +187,189 @@ string ArgvMap::configstring(bool running, bool full)
 {
   string help;
 
-  if (running)
-    help="# Autogenerated configuration file based on running instance ("+nowTime()+")\n\n";
-  else
-    help="# Autogenerated configuration file template\n\n";
+  if (running) {
+    help = "# Autogenerated configuration file based on running instance (" + nowTime() + ")\n\n";
+  }
+  else {
+    help = "# Autogenerated configuration file template\n\n";
+  }
 
   // Affects parsing, should come first.
   help += formatOne(running, full, "ignore-unknown-settings", helpmap["ignore-unknown-settings"], defaultmap["ignore-unknown-settings"], d_params["ignore-unknown-settings"]);
 
-  for(const auto& i: helpmap) {
-    if (d_typeMap[i.first] == "Command")
+  for (const auto& helpitem : helpmap) {
+    if (d_typeMap[helpitem.first] == "Command") {
       continue;
-    if (i.first == "ignore-unknown-settings")
+    }
+    if (helpitem.first == "ignore-unknown-settings") {
       continue;
-
-    if (!defaultmap.count(i.first)) {
-      throw ArgException(string("Default for setting '")+i.first+"' not set");
     }
 
-    help += formatOne(running, full, i.first, i.second, defaultmap[i.first], d_params[i.first]);
+    if (defaultmap.count(helpitem.first) == 0) {
+      throw ArgException(string("Default for setting '") + helpitem.first + "' not set");
+    }
+
+    help += formatOne(running, full, helpitem.first, helpitem.second, defaultmap[helpitem.first], d_params[helpitem.first]);
   }
 
   if (running) {
-    for(const auto& i: d_unknownParams) {
-      help += formatOne(running, full, i.first, "unknown setting", "", i.second);
+    for (const auto& unknown : d_unknownParams) {
+      help += formatOne(running, full, unknown.first, "unknown setting", "", unknown.second);
     }
   }
 
   return help;
 }
 
-const string & ArgvMap::operator[](const string &arg)
+const string& ArgvMap::operator[](const string& arg)
 {
-  if(!parmIsset(arg))
-    throw ArgException(string("Undefined but needed argument: '")+arg+"'");
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
   return d_params[arg];
 }
 
-mode_t ArgvMap::asMode(const string &arg)
+mode_t ArgvMap::asMode(const string& arg)
 {
-  mode_t mode;
-  const char *cptr_orig;
-  char *cptr_ret = nullptr;
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
-  if(!parmIsset(arg))
-   throw ArgException(string("Undefined but needed argument: '")+arg+"'");
+  const auto* const cptr_orig = d_params[arg].c_str();
+  char* cptr_ret = nullptr;
 
-  cptr_orig = d_params[arg].c_str();
-  mode = static_cast<mode_t>(strtol(cptr_orig, &cptr_ret, 8));
-  if (mode == 0 && cptr_ret == cptr_orig)
+  auto mode = static_cast<mode_t>(strtol(cptr_orig, &cptr_ret, 8));
+  if (mode == 0 && cptr_ret == cptr_orig) {
     throw ArgException("'" + arg + string("' contains invalid octal mode"));
-   return mode;
+  }
+  return mode;
 }
 
-gid_t ArgvMap::asGid(const string &arg)
+gid_t ArgvMap::asGid(const string& arg)
 {
-  gid_t gid;
-  const char *cptr_orig;
-  char *cptr_ret = nullptr;
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
-  if(!parmIsset(arg))
-   throw ArgException(string("Undefined but needed argument: '")+arg+"'");
-
-  cptr_orig = d_params[arg].c_str();
-  gid = static_cast<gid_t>(strtol(cptr_orig, &cptr_ret, 0));
+  const auto* cptr_orig = d_params[arg].c_str();
+  char* cptr_ret = nullptr;
+  auto gid = static_cast<gid_t>(strtol(cptr_orig, &cptr_ret, 0));
   if (gid == 0 && cptr_ret == cptr_orig) {
     // try to resolve
-    struct group *group = getgrnam(d_params[arg].c_str());
-    if (group == nullptr)
-     throw ArgException("'" + arg + string("' contains invalid group"));
+
+    struct group* group = getgrnam(d_params[arg].c_str()); // NOLINT: called before going multi-threaded
+    if (group == nullptr) {
+      throw ArgException("'" + arg + string("' contains invalid group"));
+    }
     gid = group->gr_gid;
-   }
-   return gid;
+  }
+  return gid;
 }
 
-uid_t ArgvMap::asUid(const string &arg)
+uid_t ArgvMap::asUid(const string& arg)
 {
-  uid_t uid;
-  const char *cptr_orig;
-  char *cptr_ret = nullptr;
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
-  if(!parmIsset(arg))
-   throw ArgException(string("Undefined but needed argument: '")+arg+"'");
+  const auto* cptr_orig = d_params[arg].c_str();
+  char* cptr_ret = nullptr;
 
-  cptr_orig = d_params[arg].c_str();
-  uid = static_cast<uid_t>(strtol(cptr_orig, &cptr_ret, 0));
+  auto uid = static_cast<uid_t>(strtol(cptr_orig, &cptr_ret, 0));
   if (uid == 0 && cptr_ret == cptr_orig) {
     // try to resolve
-    struct passwd *pwent = getpwnam(d_params[arg].c_str());
-    if (pwent == nullptr)
-     throw ArgException("'" + arg + string("' contains invalid group"));
+    struct passwd* pwent = getpwnam(d_params[arg].c_str()); // NOLINT: called before going multi-threaded
+    if (pwent == nullptr) {
+      throw ArgException("'" + arg + string("' contains invalid group"));
+    }
     uid = pwent->pw_uid;
-   }
-   return uid;
+  }
+  return uid;
 }
 
-int ArgvMap::asNum(const string &arg, int def)
+int ArgvMap::asNum(const string& arg, int def)
 {
-  int retval;
-  const char *cptr_orig;
-  char *cptr_ret = nullptr;
-
-  if(!parmIsset(arg))
-    throw ArgException(string("Undefined but needed argument: '")+arg+"'");
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
   // use default for empty values
-  if (d_params[arg].empty())
-   return def;
+  if (d_params[arg].empty()) {
+    return def;
+  }
 
-  cptr_orig = d_params[arg].c_str();
-  retval = static_cast<int>(strtol(cptr_orig, &cptr_ret, 0));
-  if (!retval && cptr_ret == cptr_orig)
-   throw ArgException("'"+arg+"' value '"+string(cptr_orig) + string( "' is not a valid number"));
+  const auto* cptr_orig = d_params[arg].c_str();
+  char* cptr_ret = nullptr;
+  auto retval = static_cast<int>(strtol(cptr_orig, &cptr_ret, 0));
+  if (retval == 0 && cptr_ret == cptr_orig) {
+    throw ArgException("'" + arg + "' value '" + string(cptr_orig) + string("' is not a valid number"));
+  }
 
   return retval;
 }
 
-bool ArgvMap::isEmpty(const string &arg)
+bool ArgvMap::isEmpty(const string& arg)
 {
-   if(!parmIsset(arg))
+  if (!parmIsset(arg)) {
     return true;
-   return d_params[arg].empty();
+  }
+  return d_params[arg].empty();
 }
 
-double ArgvMap::asDouble(const string &arg)
+double ArgvMap::asDouble(const string& arg)
 {
-  double retval;
-  const char *cptr_orig;
-  char *cptr_ret = nullptr;
+  if (!parmIsset(arg)) {
+    throw ArgException(string("Undefined but needed argument: '") + arg + "'");
+  }
 
-  if(!parmIsset(arg))
-    throw ArgException(string("Undefined but needed argument: '")+arg+"'");
+  if (d_params[arg].empty()) {
+    return 0.0;
+  }
 
-  if (d_params[arg].empty())
-   return 0.0;
+  const auto* cptr_orig = d_params[arg].c_str();
+  char* cptr_ret = nullptr;
+  auto retval = strtod(cptr_orig, &cptr_ret);
 
-  cptr_orig = d_params[arg].c_str();
-  retval = strtod(cptr_orig, &cptr_ret);
-
-  if (retval == 0 && cptr_ret == cptr_orig)
-   throw ArgException("'"+arg+string("' is not valid double"));
+  if (retval == 0 && cptr_ret == cptr_orig) {
+    throw ArgException("'" + arg + string("' is not valid double"));
+  }
 
   return retval;
 }
 
 ArgvMap::ArgvMap()
 {
-  set("ignore-unknown-settings","Configuration settings to ignore if they are unknown")="";
+  set("ignore-unknown-settings", "Configuration settings to ignore if they are unknown") = "";
 }
 
-bool ArgvMap::parmIsset(const string &var)
+bool ArgvMap::parmIsset(const string& var)
 {
   return d_params.find(var) != d_params.end();
 }
 
 // ATM Shared between Recursor and Auth, is that a good idea?
-static const map<string,string> deprecateList = {
-  { "stats-api-blacklist", "stats-api-disabled-list" },
-  { "stats-carbon-blacklist", "stats-carbon-disabled-list" },
-  { "stats-rec-control-blacklist", "stats-rec-control-disabled-list" },
-  { "stats-snmp-blacklist", "stats-snmp-disabled-list" },
-  { "edns-subnet-whitelist", "edns-subnet-allow-list" },
-  { "new-domain-whitelist", "new-domain-ignore-list" },
-  { "snmp-master-socket", "snmp-daemon-socket" },
-  { "xpf-allow-from", "Proxy Protocol" },
-  { "xpf-rr-code", "Proxy Protocol" },
+static const map<string, string> deprecateList = {
+  {"stats-api-blacklist", "stats-api-disabled-list"},
+  {"stats-carbon-blacklist", "stats-carbon-disabled-list"},
+  {"stats-rec-control-blacklist", "stats-rec-control-disabled-list"},
+  {"stats-snmp-blacklist", "stats-snmp-disabled-list"},
+  {"edns-subnet-whitelist", "edns-subnet-allow-list"},
+  {"new-domain-whitelist", "new-domain-ignore-list"},
+  {"snmp-master-socket", "snmp-daemon-socket"},
+  {"xpf-allow-from", "Proxy Protocol"},
+  {"xpf-rr-code", "Proxy Protocol"},
+  {"allow-unsigned-supermaster", "allow-unsigned-autoprimary"},
+  {"master", "primary"},
+  {"slave-cycle-interval", "xfr-cycle-interval"},
+  {"slave-renotify", "secondary-do-renotify"},
+  {"slave", "secondary"},
+  {"superslave", "autosecondary"},
+  {"domain-metadata-cache-ttl", "zone-metadata-cache-ttl"},
 };
 
-void ArgvMap::warnIfDeprecated(const string& var)
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): accesses d_log (compiled out in auth, hence clang-tidy message)
+void ArgvMap::warnIfDeprecated(const string& var) const
 {
   const auto msg = deprecateList.find(var);
   if (msg != deprecateList.end()) {
@@ -369,107 +378,113 @@ void ArgvMap::warnIfDeprecated(const string& var)
   }
 }
 
-void ArgvMap::parseOne(const string &arg, const string &parseOnly, bool lax)
+string ArgvMap::isDeprecated(const string& var)
 {
-  string var, val;
-  string::size_type pos;
+  const auto msg = deprecateList.find(var);
+  return msg != deprecateList.end() ? msg->second : "";
+}
+
+void ArgvMap::parseOne(const string& arg, const string& parseOnly, bool lax)
+{
+  string var;
+  string val;
+  string::size_type pos = 0;
   bool incremental = false;
 
-  if(arg.find("--") == 0 && (pos=arg.find("+="))!=string::npos) // this is a --port+=25 case
+  if (arg.find("--") == 0 && (pos = arg.find("+=")) != string::npos) // this is a --port+=25 case
   {
-    var=arg.substr(2,pos-2);
-    val=arg.substr(pos+2);
+    var = arg.substr(2, pos - 2);
+    val = arg.substr(pos + 2);
     incremental = true;
   }
-  else if(arg.find("--") == 0 && (pos=arg.find('='))!=string::npos)  // this is a --port=25 case
+  else if (arg.find("--") == 0 && (pos = arg.find('=')) != string::npos) // this is a --port=25 case
   {
-    var=arg.substr(2,pos-2);
-    val=arg.substr(pos+1);
+    var = arg.substr(2, pos - 2);
+    val = arg.substr(pos + 1);
   }
-  else if(arg.find("--") == 0 && (arg.find('=')==string::npos))  // this is a --daemon case
+  else if (arg.find("--") == 0 && (arg.find('=') == string::npos)) // this is a --daemon case
   {
-    var=arg.substr(2);
-    val="";
+    var = arg.substr(2);
+    val = "";
   }
-  else if(arg[0]=='-' && arg.length() > 1)
-  {
-    var=arg.substr(1);
-    val="";
+  else if (arg[0] == '-' && arg.length() > 1) {
+    var = arg.substr(1);
+    val = "";
   }
-  else // command
+  else { // command
     d_cmds.push_back(arg);
+  }
 
   boost::trim(var);
 
-  if(var!="" && (parseOnly.empty() || var==parseOnly)) {
+  if (!var.empty() && (parseOnly.empty() || var == parseOnly)) {
     if (!lax) {
       warnIfDeprecated(var);
     }
-    pos=val.find_first_not_of(" \t");  // strip leading whitespace
-    if(pos && pos!=string::npos)
-      val=val.substr(pos);
-    if(parmIsset(var))
-    {
-      if(incremental)
-      {
-        if(d_params[var].empty())
-        {
-          if(!d_cleared.count(var))
-            throw ArgException("Incremental setting '"+var+"' without a parent");
+    pos = val.find_first_not_of(" \t"); // strip leading whitespace
+    if (pos != 0 && pos != string::npos) {
+      val = val.substr(pos);
+    }
+    if (parmIsset(var)) {
+      if (incremental) {
+        if (d_params[var].empty()) {
+          if (d_cleared.count(var) == 0) {
+            throw ArgException("Incremental setting '" + var + "' without a parent");
+          }
           d_params[var] = val;
         }
-        else
+        else {
           d_params[var] += ", " + val;
+        }
       }
-      else
-      {
+      else {
         d_params[var] = val;
         d_cleared.insert(var);
       }
     }
-    else
-    {
+    else {
       // unknown setting encountered. see if its on the ignore list before throwing.
       vector<string> parts;
       stringtok(parts, d_params["ignore-unknown-settings"], " ,\t\n\r");
       if (find(parts.begin(), parts.end(), var) != parts.end()) {
         d_unknownParams[var] = val;
-        SLOG(g_log<<Logger::Warning<<"Ignoring unknown setting '"<<var<<"' as requested"<<endl,
+        SLOG(g_log << Logger::Warning << "Ignoring unknown setting '" << var << "' as requested" << endl,
              d_log->info(Logr::Warning, "Ignoring unknown setting as requested", "name", Logging::Loggable(var)));
         return;
       }
 
       if (!lax) {
-        throw ArgException("Trying to set unknown setting '"+var+"'");
+        throw ArgException("Trying to set unknown setting '" + var + "'");
       }
     }
   }
 }
 
-const vector<string>&ArgvMap::getCommands()
+const vector<string>& ArgvMap::getCommands()
 {
   return d_cmds;
 }
 
-void ArgvMap::parse(int &argc, char **argv, bool lax)
+void ArgvMap::parse(int& argc, char** argv, bool lax)
 {
   d_cmds.clear();
   d_cleared.clear();
-  for(int n=1;n<argc;n++) {
-    parseOne(argv[n],"",lax);
+  for (int i = 1; i < argc; i++) {
+    parseOne(argv[i], "", lax); // NOLINT: Posix argument parsing
   }
 }
 
-void ArgvMap::preParse(int &argc, char **argv, const string &arg)
+void ArgvMap::preParse(int& argc, char** argv, const string& arg)
 {
-  for(int n=1;n<argc;n++) {
-    string varval=argv[n];
-    if(varval.find("--"+arg) == 0)
-      parseOne(argv[n]);
+  for (int i = 1; i < argc; i++) {
+    string varval = argv[i]; // NOLINT: Posix argument parsing
+    if (varval.find("--" + arg) == 0) {
+      parseOne(argv[i]); // NOLINT:  Posix argument parsing
+    }
   }
 }
 
-bool ArgvMap::parseFile(const char* fname, const string& arg, bool lax)
+bool ArgvMap::parseFile(const string& fname, const string& arg, bool lax)
 {
   string line;
   string pline;
@@ -517,19 +532,19 @@ bool ArgvMap::parseFile(const char* fname, const string& arg, bool lax)
   return true;
 }
 
-bool ArgvMap::preParseFile(const char *fname, const string &arg, const string& theDefault)
+bool ArgvMap::preParseFile(const string& fname, const string& arg, const string& theDefault)
 {
   d_params[arg] = theDefault;
 
   return parseFile(fname, arg, false);
 }
 
-bool ArgvMap::file(const char* fname, bool lax)
+bool ArgvMap::file(const string& fname, bool lax)
 {
   return file(fname, lax, false);
 }
 
-bool ArgvMap::file(const char* fname, bool lax, bool included)
+bool ArgvMap::file(const string& fname, bool lax, bool included)
 {
   if (!parmIsset("include-dir")) { // inject include-dir
     set("include-dir", "Directory to include configuration files from");
@@ -544,7 +559,7 @@ bool ArgvMap::file(const char* fname, bool lax, bool included)
   // handle include here (avoid re-include)
   if (!included && !d_params["include-dir"].empty()) {
     std::vector<std::string> extraConfigs;
-    gatherIncludes(extraConfigs);
+    gatherIncludes(d_params["include-dir"], ".conf", extraConfigs);
     for (const std::string& filename : extraConfigs) {
       if (!file(filename.c_str(), lax, true)) {
         SLOG(g_log << Logger::Error << filename << " could not be parsed" << std::endl,
@@ -557,39 +572,44 @@ bool ArgvMap::file(const char* fname, bool lax, bool included)
   return true;
 }
 
-void ArgvMap::gatherIncludes(std::vector<std::string> &extraConfigs) {
-  extraConfigs.clear();
-  if (d_params["include-dir"].empty())
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static): accesses d_log (compiled out in auth, hence clang-tidy message)
+void ArgvMap::gatherIncludes(const std::string& directory, const std::string& suffix, std::vector<std::string>& extraConfigs)
+{
+  if (directory.empty()) {
     return; // nothing to do
+  }
 
-  DIR *dir;
-  if (!(dir = opendir(d_params["include-dir"].c_str()))) {
+  auto dir = std::unique_ptr<DIR, decltype(&closedir)>(opendir(directory.c_str()), closedir);
+  if (dir == nullptr) {
     int err = errno;
-    string msg = d_params["include-dir"] + " is not accessible: " + strerror(err);
+    string msg = directory + " is not accessible: " + stringerror(err);
     SLOG(g_log << Logger::Error << msg << std::endl,
-         d_log->error(Logr::Error, err, "Directory is not accessible", "name", Logging::Loggable(d_params["include-dir"])));
+         d_log->error(Logr::Error, err, "Directory is not accessible", "name", Logging::Loggable(directory)));
     throw ArgException(msg);
   }
 
-  struct dirent *ent;
-  while ((ent = readdir(dir)) != nullptr) {
-    if (ent->d_name[0] == '.')
+  std::vector<std::string> vec;
+  struct dirent* ent = nullptr;
+  while ((ent = readdir(dir.get())) != nullptr) { // NOLINT(concurrency-mt-unsafe): see Linux man page
+    if (ent->d_name[0] == '.') {
       continue; // skip any dots
-    if (boost::ends_with(ent->d_name, ".conf")) {
+    }
+    if (boost::ends_with(ent->d_name, suffix)) {
       // build name
-      string name = d_params["include-dir"] + "/" + ent->d_name; // FIXME: Use some path separator
+      string name = directory + "/" + ent->d_name; // NOLINT: Posix API
       // ensure it's readable file
-      struct stat st;
-      if (stat(name.c_str(), &st) || !S_ISREG(st.st_mode)) {
+      struct stat statInfo
+      {
+      };
+      if (stat(name.c_str(), &statInfo) != 0 || !S_ISREG(statInfo.st_mode)) {
         string msg = name + " is not a regular file";
         SLOG(g_log << Logger::Error << msg << std::endl,
              d_log->info(Logr::Error, "Unable to open non-regular file", "name", Logging::Loggable(name)));
-        closedir(dir);
         throw ArgException(msg);
       }
-      extraConfigs.push_back(name);
+      vec.emplace_back(name);
     }
   }
-  std::sort(extraConfigs.begin(), extraConfigs.end(), CIStringComparePOSIX());
-  closedir(dir);
+  std::sort(vec.begin(), vec.end(), CIStringComparePOSIX());
+  extraConfigs.insert(extraConfigs.end(), vec.begin(), vec.end());
 }

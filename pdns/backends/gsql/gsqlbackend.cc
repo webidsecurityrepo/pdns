@@ -1989,7 +1989,7 @@ bool GSQLBackend::getComment(Comment& comment)
   }
 }
 
-void GSQLBackend::feedComment(const Comment& comment)
+bool GSQLBackend::feedComment(const Comment& comment)
 {
   try {
     reconnectIfNeeded();
@@ -2007,6 +2007,8 @@ void GSQLBackend::feedComment(const Comment& comment)
   catch (SSqlException &e) {
     throw PDNSException("GSQLBackend unable to feed comment for RRSet '" + comment.qname.toLogString() + "|" + comment.qtype.toString() + "': "+e.txtReason());
   }
+
+  return true;
 }
 
 bool GSQLBackend::replaceComments(const uint32_t domain_id, const DNSName& qname, const QType& qt, const vector<Comment>& comments)
@@ -2156,7 +2158,7 @@ void GSQLBackend::extractRecord(SSqlStatement::row_t& row, DNSResourceRecord& r)
 
   r.qtype=row[3];
 
-  if (d_upgradeContent && DNSRecordContent::isUnknownType(row[3]) && r.qtype.isSupportedType()) {
+  if (d_upgradeContent && DNSRecordContent::isUnknownType(row[3]) && DNSRecordContent::isRegisteredType(r.qtype, r.qclass)) {
     r.content = DNSRecordContent::upgradeContent(r.qname, r.qtype, row[0]);
   }
   else if (r.qtype==QType::MX || r.qtype==QType::SRV) {

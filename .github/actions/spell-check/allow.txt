@@ -240,6 +240,7 @@ batchmode
 baz
 bbnew
 bbold
+bbr
 bbsv
 bccaf
 bdr
@@ -427,7 +428,6 @@ checkrr
 checkzone
 chgrp
 childstat
-chkconfig
 chmod
 chown
 chr
@@ -830,6 +830,7 @@ dontdrop
 dontinclude
 dontqueries
 DONTWAIT
+DOQ
 doquery
 dosec
 dotests
@@ -2548,7 +2549,6 @@ PBpq
 pbtag
 pcall
 PCDNSSEC
-PCKS
 PCmissing
 pcomp
 pcount
@@ -3548,7 +3548,7 @@ tcpavgqueriesperconnection
 tcpbench
 tcpbytesanswered
 tcpclient
-tcpclientimeouts
+tcpclienttimeouts
 tcpclientthreads
 tcpcurrentconnections
 tcpdiedreaddingresponse

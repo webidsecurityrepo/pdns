@@ -3,7 +3,7 @@ DNS-over-HTTPS (DoH)
 
 :program:`dnsdist` supports DNS-over-HTTPS (DoH, standardized in RFC 8484) for incoming queries since 1.4.0, and for outgoing queries since 1.7.0.
 To see if the installation supports this, run ``dnsdist --version``.
-If the output shows ``dns-over-https(DOH)``, incoming DNS-over-HTTPS is supported. If ``outgoing-dns-over-https(nghttp2)`` shows up then outgoing DNS-over-HTTPS is supported.
+If the output shows ``dns-over-https(DOH)`` (``dns-over-https(h2o nghttp2)``, ``dns-over-https(h2o)`` or ``dns-over-https(nghttp2)`` since 1.9.0) , incoming DNS-over-HTTPS is supported. If ``outgoing-dns-over-https(nghttp2)`` shows up then outgoing DNS-over-HTTPS is supported.
 
 Incoming
 --------
@@ -25,7 +25,7 @@ the call to :func:`addDOHLocal`. It is optional and defaults to ``/`` in 1.4.0, 
 
 The fifth parameter, if present, indicates various options. For instance, you use it to indicate custom HTTP headers. An example is::
 
-  addDOHLocal('2001:db8:1:f00::1', '/etc/ssl/certs/example.com.pem', '/etc/ssl/private/example.com.key', "/dns", {customResponseHeaders={["x-foo"]="bar"}}
+  addDOHLocal('2001:db8:1:f00::1', '/etc/ssl/certs/example.com.pem', '/etc/ssl/private/example.com.key', "/dns", {customResponseHeaders={["x-foo"]="bar"}})
 
 A more complicated (and more realistic) example is when you want to indicate metainformation about the server, such as the stated policy (privacy statement and so on). We use the link types of RFC 8631::
 
@@ -53,6 +53,16 @@ To let dnsdist listen for DoH queries over HTTP on localhost at port 8053 add on
 
   addDOHLocal("127.0.0.1:8053")
   addDOHLocal("127.0.0.1:8053", nil, nil, "/", { reusePort=true })
+
+HTTP/1 support
+^^^^^^^^^^^^^^
+
+dnsdist initially relied on the ``h2o`` library to support incoming DNS over HTTPS. Since 1.9.0, ``h2o`` has been deprecated and ``nghttp2`` is the
+preferred library for incoming DoH support, because ``h2o`` has unfortunately really never been maintained in a way that is suitable for use as a library
+(see https://github.com/h2o/h2o/issues/3230). While we took great care to make the migration as painless as possible, ``h2o`` supported HTTP/1 while ``nghttp2``
+does not. This is not an issue for actual DNS over HTTPS clients that support HTTP/2, but might be one in setups running dnsdist behind a reverse-proxy that
+does not support HTTP/2, like nginx. We do not plan on implementing HTTP/1, and recommend using HTTP/2 between the reverse-proxy and dnsdist for performance reasons.
+For nginx in particular, a possible work-around is to use the `grpc_pass <http://nginx.org/r/grpc_pass>`_ directive as suggested in their `bug tracker <https://trac.nginx.org/nginx/ticket/1875>`_.
 
 Internal design
 ^^^^^^^^^^^^^^^
@@ -84,6 +94,8 @@ Outgoing
 
 Support for securing the exchanges between dnsdist and the backend will be implemented in 1.7.0, and will lead to all queries, regardless of whether they were initially received by dnsdist over UDP, TCP, DoT or DoH, being forwarded over a secure DNS over HTTPS channel.
 That support can be enabled via the ``dohPath`` parameter of the :func:`newServer` command. Additional parameters control the TLS provider used (``tls``), the validation of the certificate presented by the backend (``caStore``, ``validateCertificates``), the actual TLS ciphers used (``ciphers``, ``ciphersTLS13``) and the SNI value sent (``subjectName``).
+
+.. code-block:: lua
 
   newServer({address="[2001:DB8::1]:443", tls="openssl", subjectName="doh.powerdns.com", dohPath="/dns-query", validateCertificates=true})
 

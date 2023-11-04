@@ -322,7 +322,7 @@ void DynListener::sendlines(const string &l)
 void DynListener::registerFunc(const string &name, g_funk_t *gf, const string &usage, const string &args)
 {
   g_funkwithusage_t e = {gf, args, usage};
-  s_funcdb[name]=e;
+  s_funcdb[name] = std::move(e);
 }
 
 void DynListener::registerRestFunc(g_funk_t *gf)
@@ -337,7 +337,7 @@ void DynListener::theListener()
   try {
     signal(SIGPIPE,SIG_IGN);
 
-    for(int n=0;;++n) {
+    for(;;) {
       string line=getLine();
       boost::trim_right(line);
 

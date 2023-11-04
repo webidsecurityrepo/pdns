@@ -78,7 +78,7 @@ int Utility::timed_connect( Utility::sock_t sock,
 
 
 
-void Utility::setBindAny(int af, sock_t sock)
+void Utility::setBindAny([[maybe_unused]] int af, [[maybe_unused]] sock_t sock)
 {
   const int one = 1;
 
@@ -165,7 +165,7 @@ void Utility::dropGroupPrivs( uid_t uid, gid_t gid )
       if (initgroups(pw->pw_name, gid)<0) {
         int err = errno;
         SLOG(g_log<<Logger::Critical<<"Unable to set supplementary groups: "<<stringerror(err)<<endl,
-             g_slog->withName("runtime")->error(Logr::Critical, err, "Unable to drop supplementary groups"));
+             g_slog->withName("runtime")->error(Logr::Critical, err, "Unable to set supplementary groups"));
         exit(1);
       }
     }
@@ -180,12 +180,12 @@ void Utility::dropUserPrivs( uid_t uid )
     if(setuid(uid)<0) {
       int err = errno;
       SLOG(g_log<<Logger::Critical<<"Unable to set effective user id to "<<uid<<": "<<stringerror(err)<<endl,
-           g_slog->withName("runtime")->error(Logr::Error, err, "Unable to set effective user id", "uid", Logging::Loggable(uid)));
+           g_slog->withName("runtime")->error(Logr::Critical, err, "Unable to set effective user id", "uid", Logging::Loggable(uid)));
       exit(1);
     }
     else {
       SLOG(g_log<<Logger::Info<<"Set effective user id to "<<uid<<endl,
-           g_slog->withName("runtime")->info("Set effective user", "uid", Logging::Loggable(uid)));
+           g_slog->withName("runtime")->info(Logr::Info, "Set effective user", "uid", Logging::Loggable(uid)));
     }
   }
 }
@@ -199,17 +199,9 @@ Utility::pid_t Utility::getpid( )
 
 
 // Returns the current time.
-int Utility::gettimeofday( struct timeval *tv, void *tz )
+int Utility::gettimeofday( struct timeval *tv, void * /* tz */)
 {
-  return ::gettimeofday(tv,nullptr);
-}
-
-// Sets the random seed.
-void Utility::srandom()
-{
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
-  ::srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
+  return ::gettimeofday(tv, nullptr);
 }
 
 // Writes a vector.

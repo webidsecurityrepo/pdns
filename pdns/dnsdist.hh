@@ -20,9 +20,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #pragma once
+
 #include "config.h"
 #include "ext/luawrapper/include/LuaContext.hpp"
 
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,7 +43,8 @@
 #include "dnsdist-lbpolicies.hh"
 #include "dnsdist-protocols.hh"
 #include "dnsname.hh"
-#include "doh.hh"
+#include "dnsdist-doh-common.hh"
+#include "doq.hh"
 #include "ednsoptions.hh"
 #include "iputils.hh"
 #include "misc.hh"
@@ -329,133 +332,6 @@ extern vector<pair<struct timeval, std::string> > g_confDelta;
 
 using pdns::stat_t;
 
-struct DNSDistStats
-{
-  stat_t responses{0};
-  stat_t servfailResponses{0};
-  stat_t queries{0};
-  stat_t frontendNXDomain{0};
-  stat_t frontendServFail{0};
-  stat_t frontendNoError{0};
-  stat_t nonCompliantQueries{0};
-  stat_t nonCompliantResponses{0};
-  stat_t rdQueries{0};
-  stat_t emptyQueries{0};
-  stat_t aclDrops{0};
-  stat_t dynBlocked{0};
-  stat_t ruleDrop{0};
-  stat_t ruleNXDomain{0};
-  stat_t ruleRefused{0};
-  stat_t ruleServFail{0};
-  stat_t ruleTruncated{0};
-  stat_t selfAnswered{0};
-  stat_t downstreamTimeouts{0};
-  stat_t downstreamSendErrors{0};
-  stat_t truncFail{0};
-  stat_t noPolicy{0};
-  stat_t cacheHits{0};
-  stat_t cacheMisses{0};
-  stat_t latency0_1{0}, latency1_10{0}, latency10_50{0}, latency50_100{0}, latency100_1000{0}, latencySlow{0}, latencySum{0}, latencyCount{0};
-  stat_t securityStatus{0};
-  stat_t dohQueryPipeFull{0};
-  stat_t dohResponsePipeFull{0};
-  stat_t outgoingDoHQueryPipeFull{0};
-  stat_t proxyProtocolInvalid{0};
-  stat_t tcpQueryPipeFull{0};
-  stat_t tcpCrossProtocolQueryPipeFull{0};
-  stat_t tcpCrossProtocolResponsePipeFull{0};
-  double latencyAvg100{0}, latencyAvg1000{0}, latencyAvg10000{0}, latencyAvg1000000{0};
-  double latencyTCPAvg100{0}, latencyTCPAvg1000{0}, latencyTCPAvg10000{0}, latencyTCPAvg1000000{0};
-  double latencyDoTAvg100{0}, latencyDoTAvg1000{0}, latencyDoTAvg10000{0}, latencyDoTAvg1000000{0};
-  double latencyDoHAvg100{0}, latencyDoHAvg1000{0}, latencyDoHAvg10000{0}, latencyDoHAvg1000000{0};
-  typedef std::function<uint64_t(const std::string&)> statfunction_t;
-  typedef boost::variant<stat_t*, pdns::stat_t_trait<double>*, double*, statfunction_t> entry_t;
-
-  std::vector<std::pair<std::string, entry_t>> entries{
-    {"responses", &responses},
-    {"servfail-responses", &servfailResponses},
-    {"queries", &queries},
-    {"frontend-nxdomain", &frontendNXDomain},
-    {"frontend-servfail", &frontendServFail},
-    {"frontend-noerror", &frontendNoError},
-    {"acl-drops", &aclDrops},
-    {"rule-drop", &ruleDrop},
-    {"rule-nxdomain", &ruleNXDomain},
-    {"rule-refused", &ruleRefused},
-    {"rule-servfail", &ruleServFail},
-    {"rule-truncated", &ruleTruncated},
-    {"self-answered", &selfAnswered},
-    {"downstream-timeouts", &downstreamTimeouts},
-    {"downstream-send-errors", &downstreamSendErrors},
-    {"trunc-failures", &truncFail},
-    {"no-policy", &noPolicy},
-    {"latency0-1", &latency0_1},
-    {"latency1-10", &latency1_10},
-    {"latency10-50", &latency10_50},
-    {"latency50-100", &latency50_100},
-    {"latency100-1000", &latency100_1000},
-    {"latency-slow", &latencySlow},
-    {"latency-avg100", &latencyAvg100},
-    {"latency-avg1000", &latencyAvg1000},
-    {"latency-avg10000", &latencyAvg10000},
-    {"latency-avg1000000", &latencyAvg1000000},
-    {"latency-tcp-avg100", &latencyTCPAvg100},
-    {"latency-tcp-avg1000", &latencyTCPAvg1000},
-    {"latency-tcp-avg10000", &latencyTCPAvg10000},
-    {"latency-tcp-avg1000000", &latencyTCPAvg1000000},
-    {"latency-dot-avg100", &latencyDoTAvg100},
-    {"latency-dot-avg1000", &latencyDoTAvg1000},
-    {"latency-dot-avg10000", &latencyDoTAvg10000},
-    {"latency-dot-avg1000000", &latencyDoTAvg1000000},
-    {"latency-doh-avg100", &latencyDoHAvg100},
-    {"latency-doh-avg1000", &latencyDoHAvg1000},
-    {"latency-doh-avg10000", &latencyDoHAvg10000},
-    {"latency-doh-avg1000000", &latencyDoHAvg1000000},
-    {"uptime", uptimeOfProcess},
-    {"real-memory-usage", getRealMemoryUsage},
-    {"special-memory-usage", getSpecialMemoryUsage},
-    {"udp-in-errors", std::bind(udpErrorStats, "udp-in-errors")},
-    {"udp-noport-errors", std::bind(udpErrorStats, "udp-noport-errors")},
-    {"udp-recvbuf-errors", std::bind(udpErrorStats, "udp-recvbuf-errors")},
-    {"udp-sndbuf-errors", std::bind(udpErrorStats, "udp-sndbuf-errors")},
-    {"udp-in-csum-errors", std::bind(udpErrorStats, "udp-in-csum-errors")},
-    {"udp6-in-errors", std::bind(udp6ErrorStats, "udp6-in-errors")},
-    {"udp6-recvbuf-errors", std::bind(udp6ErrorStats, "udp6-recvbuf-errors")},
-    {"udp6-sndbuf-errors", std::bind(udp6ErrorStats, "udp6-sndbuf-errors")},
-    {"udp6-noport-errors", std::bind(udp6ErrorStats, "udp6-noport-errors")},
-    {"udp6-in-csum-errors", std::bind(udp6ErrorStats, "udp6-in-csum-errors")},
-    {"tcp-listen-overflows", std::bind(tcpErrorStats, "ListenOverflows")},
-    {"noncompliant-queries", &nonCompliantQueries},
-    {"noncompliant-responses", &nonCompliantResponses},
-    {"proxy-protocol-invalid", &proxyProtocolInvalid},
-    {"rdqueries", &rdQueries},
-    {"empty-queries", &emptyQueries},
-    {"cache-hits", &cacheHits},
-    {"cache-misses", &cacheMisses},
-    {"cpu-iowait", getCPUIOWait},
-    {"cpu-steal", getCPUSteal},
-    {"cpu-sys-msec", getCPUTimeSystem},
-    {"cpu-user-msec", getCPUTimeUser},
-    {"fd-usage", getOpenFileDescriptors},
-    {"dyn-blocked", &dynBlocked},
-    {"dyn-block-nmg-size", [](const std::string&) { return g_dynblockNMG.getLocal()->size(); }},
-    {"security-status", &securityStatus},
-    {"doh-query-pipe-full", &dohQueryPipeFull},
-    {"doh-response-pipe-full", &dohResponsePipeFull},
-    {"outgoing-doh-query-pipe-full", &outgoingDoHQueryPipeFull},
-    {"tcp-query-pipe-full", &tcpQueryPipeFull},
-    {"tcp-cross-protocol-query-pipe-full", &tcpCrossProtocolQueryPipeFull},
-    {"tcp-cross-protocol-response-pipe-full", &tcpCrossProtocolResponsePipeFull},
-    // Latency histogram
-    {"latency-sum", &latencySum},
-    {"latency-count", &latencyCount},
-  };
-  std::map<std::string, stat_t, std::less<>> customCounters;
-  std::map<std::string, pdns::stat_t_trait<double>, std::less<>> customGauges;
-};
-
-extern struct DNSDistStats g_stats;
-
 class BasicQPSLimiter
 {
 public:
@@ -618,6 +494,7 @@ struct ClientState
   std::shared_ptr<DNSCryptContext> dnscryptCtx{nullptr};
   std::shared_ptr<TLSFrontend> tlsFrontend{nullptr};
   std::shared_ptr<DOHFrontend> dohFrontend{nullptr};
+  std::shared_ptr<DOQFrontend> doqFrontend{nullptr};
   std::shared_ptr<BPFFilter> d_filter{nullptr};
   size_t d_maxInFlightQueriesPerConn{1};
   size_t d_tcpConcurrentConnectionsLimit{0};
@@ -655,6 +532,17 @@ struct ClientState
     return tlsFrontend != nullptr || (dohFrontend != nullptr && dohFrontend->isHTTPS());
   }
 
+  const TLSFrontend& getTLSFrontend() const
+  {
+    if (tlsFrontend != nullptr) {
+      return *tlsFrontend;
+    }
+    if (dohFrontend) {
+      return dohFrontend->d_tlsContext;
+    }
+    throw std::runtime_error("Trying to get a TLS frontend from a non-TLS ClientState");
+  }
+
   dnsdist::Protocol getProtocol() const
   {
     if (dnscryptCtx) {
@@ -681,7 +569,10 @@ struct ClientState
   {
     std::string result = udpFD != -1 ? "UDP" : "TCP";
 
-    if (dohFrontend) {
+    if (doqFrontend) {
+      result += " (DNS over QUIC)";
+    }
+    else if (dohFrontend) {
       if (dohFrontend->isHTTPS()) {
         result += " (DNS over HTTPS)";
       }
@@ -827,6 +718,16 @@ struct DownstreamState: public std::enable_shared_from_this<DownstreamState>
     bool d_upgradeToLazyHealthChecks{false};
   };
 
+  struct HealthCheckMetrics
+  {
+    stat_t d_failures{0};
+    stat_t d_timeOuts{0};
+    stat_t d_parseErrors{0};
+    stat_t d_networkErrors{0};
+    stat_t d_mismatchErrors{0};
+    stat_t d_invalidResponseErrors{0};
+  };
+
   DownstreamState(DownstreamState::Config&& config, std::shared_ptr<TLSCtx> tlsCtx, bool connect);
   DownstreamState(const ComboAddress& remote): DownstreamState(DownstreamState::Config(remote), nullptr, false)
   {
@@ -835,6 +736,7 @@ struct DownstreamState: public std::enable_shared_from_this<DownstreamState>
   ~DownstreamState();
 
   Config d_config;
+  HealthCheckMetrics d_healthCheckMetrics;
   stat_t sendErrors{0};
   stat_t outstanding{0};
   stat_t reuseds{0};
@@ -893,17 +795,20 @@ public:
   double latencyUsecTCP{0.0};
   unsigned int d_nextCheck{0};
   uint16_t currentCheckFailures{0};
-  uint8_t consecutiveSuccessfulChecks{0};
   std::atomic<bool> hashesComputed{false};
   std::atomic<bool> connected{false};
   bool upStatus{false};
 
 private:
+  void handleUDPTimeout(IDState& ids);
+  void updateNextLazyHealthCheck(LazyHealthCheckStats& stats, bool checkScheduled, std::optional<time_t> currentTime = std::nullopt);
   void connectUDPSockets();
 
   std::thread tid;
   std::mutex connectLock;
+  std::condition_variable d_connectedWait;
   std::atomic_flag threadStarted;
+  uint8_t consecutiveSuccessfulChecks{0};
   bool d_stopped{false};
 public:
 
@@ -974,7 +879,8 @@ public:
     return status;
   }
 
-  bool reconnect();
+  bool reconnect(bool initialAttempt = false);
+  void waitUntilConnected();
   void hash();
   void setId(const boost::uuids::uuid& newId);
   void setWeight(int newWeight);
@@ -1059,9 +965,6 @@ public:
   static int s_udpTimeout;
   static bool s_randomizeSockets;
   static bool s_randomizeIDs;
-private:
-  void handleUDPTimeout(IDState& ids);
-  void updateNextLazyHealthCheck(LazyHealthCheckStats& stats, bool checkScheduled, std::optional<time_t> currentTime = std::nullopt);
 };
 using servers_t = vector<std::shared_ptr<DownstreamState>>;
 
@@ -1075,7 +978,7 @@ public:
   virtual ~DNSRule ()
   {
   }
-  virtual bool matches(const DNSQuestion* dq) const =0;
+  virtual bool matches(const DNSQuestion* dq) const = 0;
   virtual string toString() const = 0;
   mutable stat_t d_matches{0};
 };
@@ -1156,6 +1059,7 @@ extern ComboAddress g_serverControl; // not changed during runtime
 
 extern std::vector<shared_ptr<TLSFrontend>> g_tlslocals;
 extern std::vector<shared_ptr<DOHFrontend>> g_dohlocals;
+extern std::vector<shared_ptr<DOQFrontend>> g_doqlocals;
 extern std::vector<std::unique_ptr<ClientState>> g_frontends;
 extern bool g_truncateTC;
 extern bool g_fixupCase;
@@ -1202,10 +1106,6 @@ struct LocalHolders
 
 void tcpAcceptorThread(std::vector<ClientState*> states);
 
-#ifdef HAVE_DNS_OVER_HTTPS
-void dohThread(ClientState* cs);
-#endif /* HAVE_DNS_OVER_HTTPS */
-
 void setLuaNoSideEffect(); // if nothing has been declared, set that there are no side effects
 void setLuaSideEffect();   // set to report a side effect, cancelling all _no_ side effect calls
 bool getLuaNoSideEffect(); // set if there were only explicit declarations of _no_ side effect
@@ -1237,7 +1137,7 @@ bool processResponse(PacketBuffer& response, const std::vector<DNSDistResponseRu
 bool processRulesResult(const DNSAction::Action& action, DNSQuestion& dq, std::string& ruleresult, bool& drop);
 bool processResponseAfterRules(PacketBuffer& response, const std::vector<DNSDistResponseRuleAction>& cacheInsertedRespRuleActions, DNSResponse& dr, bool muted);
 
-bool assignOutgoingUDPQueryToBackend(std::shared_ptr<DownstreamState>& ds, uint16_t queryID, DNSQuestion& dq, PacketBuffer& query, ComboAddress& dest);
+bool assignOutgoingUDPQueryToBackend(std::shared_ptr<DownstreamState>& ds, uint16_t queryID, DNSQuestion& dq, PacketBuffer& query);
 
 ssize_t udpClientSendRequestToBackend(const std::shared_ptr<DownstreamState>& ss, const int sd, const PacketBuffer& request, bool healthCheck = false);
 bool sendUDPResponse(int origFD, const PacketBuffer& response, const int delayMsec, const ComboAddress& origDest, const ComboAddress& origRemote);

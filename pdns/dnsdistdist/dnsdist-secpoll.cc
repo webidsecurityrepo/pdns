@@ -36,6 +36,7 @@
 #include "sstuff.hh"
 
 #include "dnsdist.hh"
+#include "dnsdist-metrics.hh"
 #include "dnsdist-random.hh"
 
 #ifndef PACKAGEVERSION
@@ -210,21 +211,21 @@ void doSecPoll(const std::string& suffix)
     int securityStatus = std::stoi(split.first);
     std::string securityMessage = split.second;
 
-    if(securityStatus == 1 && !g_secPollDone) {
-      warnlog("Polled security status of version %s at startup, no known issues reported: %s", std::string(VERSION), securityMessage);
+    if (securityStatus == 1 && !g_secPollDone) {
+      infolog("Polled security status of version %s at startup, no known issues reported: %s", std::string(VERSION), securityMessage);
     }
-    if(securityStatus == 2) {
+    if (securityStatus == 2) {
       errlog("PowerDNS DNSDist Security Update Recommended: %s", securityMessage);
     }
     else if(securityStatus == 3) {
       errlog("PowerDNS DNSDist Security Update Mandatory: %s", securityMessage);
     }
 
-    g_stats.securityStatus = securityStatus;
+    dnsdist::metrics::g_stats.securityStatus = securityStatus;
     g_secPollDone = true;
     return;
   }
-  catch(const std::exception& e) {
+  catch (const std::exception& e) {
     if (releaseVersion) {
       warnlog("Error while retrieving the security update for version %s: %s", version, e.what());
     }

@@ -49,7 +49,6 @@ class DNSName;
 typedef enum { TSIG_MD5, TSIG_SHA1, TSIG_SHA224, TSIG_SHA256, TSIG_SHA384, TSIG_SHA512, TSIG_GSS } TSIGHashEnum;
 namespace pdns
 {
-#if defined(HAVE_LIBCRYPTO)
 /**
  * \brief Retrieves the errno-based error message in a reentrant way.
  *
@@ -63,6 +62,7 @@ namespace pdns
  */
 auto getMessageFromErrno(int errnum) -> std::string;
 
+#if defined(HAVE_LIBCRYPTO)
 namespace OpenSSL
 {
   /**
@@ -414,17 +414,21 @@ struct CIStringCompare
 
 struct CIStringComparePOSIX
 {
-   bool operator() (const std::string& lhs, const std::string& rhs)
+   bool operator() (const std::string& lhs, const std::string& rhs) const
    {
-      std::string::const_iterator a,b;
       const std::locale &loc = std::locale("POSIX");
-      a=lhs.begin();b=rhs.begin();
-      while(a!=lhs.end()) {
-          if (b==rhs.end() || std::tolower(*b,loc)<std::tolower(*a,loc)) return false;
-          else if (std::tolower(*a,loc)<std::tolower(*b,loc)) return true;
-          ++a;++b;
+      auto lhsIter = lhs.begin();
+      auto rhsIter = rhs.begin();
+      while (lhsIter != lhs.end()) {
+        if (rhsIter == rhs.end() || std::tolower(*rhsIter,loc) < std::tolower(*lhsIter,loc)) {
+          return false;
+        }
+        if (std::tolower(*lhsIter,loc) < std::tolower(*rhsIter,loc)) {
+          return true;
+        }
+        ++lhsIter;++rhsIter;
       }
-      return (b!=rhs.end());
+      return rhsIter != rhs.end();
    }
 };
 
@@ -790,10 +794,7 @@ struct FDWrapper
 
   ~FDWrapper()
   {
-    if (d_fd != -1) {
-      close(d_fd);
-      d_fd = -1;
-    }
+    reset();
   }
 
   FDWrapper(FDWrapper&& rhs) noexcept : d_fd(rhs.d_fd)
@@ -819,6 +820,14 @@ struct FDWrapper
   operator int() const
   {
     return d_fd;
+  }
+
+  void reset()
+  {
+    if (d_fd != -1) {
+      ::close(d_fd);
+      d_fd = -1;
+    }
   }
 
 private:

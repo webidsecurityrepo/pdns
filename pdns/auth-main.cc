@@ -53,6 +53,7 @@
 #endif
 
 #include "auth-main.hh"
+#include "coverage.hh"
 #include "secpoll-auth.hh"
 #include "dynhandler.hh"
 #include "dnsseckeeper.hh"
@@ -196,6 +197,7 @@ static void declareArguments()
   ::arg().set("log-timestamp", "Print timestamps in log lines") = "yes";
   ::arg().set("distributor-threads", "Default number of Distributor (backend) threads to start") = "3";
   ::arg().set("signing-threads", "Default number of signer threads to start") = "3";
+  ::arg().setSwitch("workaround-11804", "Workaround for issue 11804: send single RR per AXFR chunk") = "no";
   ::arg().set("receiver-threads", "Default number of receiver threads to start") = "1";
   ::arg().set("queue-limit", "Maximum number of milliseconds to queue a query") = "1500";
   ::arg().set("resolver", "Use this resolver for ALIAS and the internal stub resolver") = "no";
@@ -210,7 +212,7 @@ static void declareArguments()
   ::arg().set("only-notify", "Only send AXFR NOTIFY to these IP addresses or netmasks") = "0.0.0.0/0,::/0";
   ::arg().set("also-notify", "When notifying a zone, also notify these nameservers") = "";
   ::arg().set("allow-notify-from", "Allow AXFR NOTIFY from these IP ranges. If empty, drop all incoming notifies.") = "0.0.0.0/0,::/0";
-  ::arg().set("slave-cycle-interval", "Schedule slave freshness checks once every .. seconds") = "60";
+  ::arg().set("slave-cycle-interval", "Schedule slave freshness checks once every .. seconds") = "";
   ::arg().set("xfr-cycle-interval", "Schedule primary/secondary SOA freshness checks once every .. seconds") = "60";
   ::arg().set("secondary-check-signature-freshness", "Check signatures in SOA freshness check. Sets DO flag on SOA queries. Outside some very problematic scenarios, say yes here.") = "yes";
 
@@ -303,7 +305,7 @@ static void declareArguments()
   ::arg().set("security-poll-suffix", "Zone name from which to query security update notifications") = "secpoll.powerdns.com.";
 
   ::arg().setSwitch("expand-alias", "Expand ALIAS records") = "no";
-  ::arg().setSwitch("outgoing-axfr-expand-alias", "Expand ALIAS records during outgoing AXFR") = "no";
+  ::arg().set("outgoing-axfr-expand-alias", "Expand ALIAS records during outgoing AXFR") = "no";
   ::arg().setSwitch("8bit-dns", "Allow 8bit dns queries") = "no";
 #ifdef HAVE_LUA_RECORDS
   ::arg().setSwitch("enable-lua-records", "Process LUA records for all zones (metadata overrides this)") = "no";
@@ -327,6 +329,8 @@ static void declareArguments()
   ::arg().setSwitch("consistent-backends", "Assume individual zones are not divided over backends. Send only ANY lookup operations to the backend to reduce the number of lookups") = "yes";
 
   ::arg().set("rng", "Specify the random number generator to use. Valid values are auto,sodium,openssl,getrandom,arc4random,urandom.") = "auto";
+
+  ::arg().set("default-catalog-zone", "Catalog zone to assign newly created primary zones (via the API) to") = "";
 #ifdef ENABLE_GSS_TSIG
   ::arg().setSwitch("enable-gss-tsig", "Enable GSS TSIG processing") = "no";
 #endif
@@ -684,8 +688,6 @@ static void triggerLoadOfLibraries()
 
 static void mainthread()
 {
-  Utility::srandom();
-
   gid_t newgid = 0;
   if (!::arg()["setgid"].empty())
     newgid = strToGID(::arg()["setgid"]);
@@ -740,6 +742,9 @@ static void mainthread()
 
   if (!PC.enabled() && ::arg().mustDo("log-dns-queries")) {
     g_log << Logger::Warning << "Packet cache disabled, logging queries without HIT/MISS" << endl;
+  }
+  if (::arg()["outgoing-axfr-expand-alias"] == "ignore-errors") {
+    g_log << Logger::Error << "Ignoring ALIAS resolve failures on outgoing AXFR transfers, see option \"outgoing-axfr-expand-alias\"" << endl;
   }
 
   stubParseResolveConf();
@@ -1179,6 +1184,14 @@ static void tbhandler(int num)
 }
 #endif
 
+#ifdef COVERAGE
+static void sigTermHandler([[maybe_unused]] int signal)
+{
+  pdns::coverage::dumpCoverageData();
+  _exit(EXIT_SUCCESS);
+}
+#endif /* COVERAGE */
+
 //! The main function of pdns, the pdns process
 int main(int argc, char** argv)
 {
@@ -1241,6 +1254,8 @@ int main(int argc, char** argv)
       ::arg().set("allow-unsigned-autoprimary") = "yes";
     if (!::arg().isEmpty("domain-metadata-cache-ttl"))
       ::arg().set("zone-metadata-cache-ttl") = ::arg()["domain-metadata-cache-ttl"];
+    if (!::arg().isEmpty("slave-cycle-interval"))
+      ::arg().set("xfr-cycle-interval") = ::arg()["slave-cycle-interval"];
 
     // this mirroring back is on purpose, so that config dumps reflect the actual setting on both names
     if (::arg().mustDo("primary"))
@@ -1254,6 +1269,7 @@ int main(int argc, char** argv)
     if (::arg().mustDo("allow-unsigned-autoprimary"))
       ::arg().set("allow-unsigned-supermaster") = "yes";
     ::arg().set("domain-metadata-cache-ttl") = ::arg()["zone-metadata-cache-ttl"];
+    ::arg().set("slave-cycle-interval") = ::arg()["xfr-cycle-interval"];
 
     g_log.setLoglevel((Logger::Urgency)(::arg().asNum("loglevel")));
     g_log.disableSyslog(::arg().mustDo("disable-syslog"));
@@ -1274,6 +1290,12 @@ int main(int argc, char** argv)
       // never get here, guardian will reinvoke process
       cerr << "Um, we did get here!" << endl;
     }
+
+#ifdef COVERAGE
+    if (!::arg().mustDo("guardian") && !::arg().mustDo("daemon")) {
+      signal(SIGTERM, sigTermHandler);
+    }
+#endif
 
     // we really need to do work - either standalone or as an instance
 
@@ -1296,8 +1318,6 @@ int main(int argc, char** argv)
 
     openssl_thread_setup();
     openssl_seed();
-    /* setup rng */
-    dns_random_init();
 
 #ifdef HAVE_LUA_RECORDS
     MiniCurl::init();
@@ -1467,12 +1487,27 @@ int main(int argc, char** argv)
     g_log << Logger::Error << "Fatal error: " << A.reason << endl;
     exit(1);
   }
+  catch (const std::exception& e) {
+    g_log << Logger::Error << "Fatal error: " << e.what() << endl;
+    exit(1);
+  }
 
   try {
     declareStats();
   }
-  catch (PDNSException& PE) {
+  catch (const PDNSException& PE) {
     g_log << Logger::Error << "Exiting because: " << PE.reason << endl;
+    exit(1);
+  }
+
+  try {
+    auto defaultCatalog = ::arg()["default-catalog-zone"];
+    if (!defaultCatalog.empty()) {
+      auto defCatalog = DNSName(defaultCatalog);
+    }
+  }
+  catch (const std::exception& e) {
+    g_log << Logger::Error << "Invalid value '" << ::arg()["default-catalog-zone"] << "' for default-catalog-zone: " << e.what() << endl;
     exit(1);
   }
   S.blacklist("special-memory-usage");
@@ -1484,14 +1519,24 @@ int main(int argc, char** argv)
   try {
     mainthread();
   }
-  catch (PDNSException& e) {
-    if (!::arg().mustDo("daemon"))
-      cerr << "Exiting because: " << e.reason << endl;
+  catch (const PDNSException& e) {
+    try {
+      if (!::arg().mustDo("daemon")) {
+        cerr << "Exiting because: " << e.reason << endl;
+      }
+    }
+    catch (const ArgException& A) {
+    }
     g_log << Logger::Error << "Exiting because: " << e.reason << endl;
   }
-  catch (std::exception& e) {
-    if (!::arg().mustDo("daemon"))
-      cerr << "Exiting because of STL error: " << e.what() << endl;
+  catch (const std::exception& e) {
+    try {
+      if (!::arg().mustDo("daemon")) {
+        cerr << "Exiting because of STL error: " << e.what() << endl;
+      }
+    }
+    catch (const ArgException& A) {
+    }
     g_log << Logger::Error << "Exiting because of STL error: " << e.what() << endl;
   }
   catch (...) {

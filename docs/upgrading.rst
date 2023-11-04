@@ -21,8 +21,11 @@ If you upgrade your database (by starting 4.8.0 without ``lmdb-schema-version=4`
 
 Upgrading is only supported from database schema versions 3 and 4, that is, databases created/upgraded by version 4.4 and up.
 
-4.6.0 to 4.7.0 or master
-------------------------
+In version 4.8.0, schema version 5 is finalised.
+Databases created with -alpha1 or -beta1 work with 4.8.0.
+
+4.6.0 to 4.7.0
+--------------
 
 Schema changes
 ^^^^^^^^^^^^^^
@@ -94,7 +97,7 @@ Renamed options
 ~~~~~~~~~~~~~~~
 
 Various settings have been renamed.
-Their old names still work in 4.5.x, but will be removed in the release after it.
+Their old names still work in 4.5.x, but will be removed in a release after it.
 
 * :ref:`setting-allow-unsigned-supermaster` is now :ref:`setting-allow-unsigned-autoprimary`
 * :ref:`setting-master` is now :ref:`setting-primary`

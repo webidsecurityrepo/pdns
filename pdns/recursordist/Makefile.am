@@ -1,5 +1,7 @@
 JSON11_LIBS = $(top_srcdir)/ext/json11/libjson11.la
 PROBDS_LIBS = $(top_srcdir)/ext/probds/libprobds.la
+ARC4RANDOM_LIBS = $(top_srcdir)/ext/arc4random/libarc4random.la
+RUST_LIBS = $(top_srcdir)/settings/rust/libsettings.a $(LIBDL)
 
 AM_CPPFLAGS = $(LUA_CFLAGS) $(YAHTTP_CFLAGS) $(BOOST_CPPFLAGS) $(LIBSODIUM_CFLAGS) $(NET_SNMP_CFLAGS) $(LIBCAP_CFLAGS) $(SANITIZER_FLAGS) -O3 -Wall -pthread -DSYSCONFDIR=\"${sysconfdir}\" $(SYSTEMD_CFLAGS)
 
@@ -39,12 +41,13 @@ BUILT_SOURCES=htmlfiles.h \
 	dnslabeltext.cc
 
 CLEANFILES = htmlfiles.h \
-	recursor.conf-dist
+	recursor.conf-dist recursor.yml-dist
 
 htmlfiles.h: incfiles html/* html/js/*
 	./incfiles > $@
 
-SUBDIRS=ext
+# We explicitly build settings in two steps, as settings modifies files in the settings/rust subdir
+SUBDIRS=ext settings settings/rust
 
 if LUA
 AM_CPPFLAGS +=$(LUA_CFLAGS)
@@ -90,7 +93,7 @@ TESTS=test_libcrypto
 
 if UNIT_TESTS
 noinst_PROGRAMS = testrunner
-TESTS_ENVIRONMENT = env BOOST_TEST_LOG_LEVEL=message SRCDIR='$(srcdir)'
+TESTS_ENVIRONMENT = env BOOST_TEST_LOG_LEVEL=message BOOST_TEST_RANDOM=1 SRCDIR='$(srcdir)'
 TESTS += testrunner
 else
 check-local:
@@ -108,11 +111,13 @@ pdns_recursor_SOURCES = \
 	burtle.hh \
 	cachecleaner.hh \
 	capabilities.cc capabilities.hh \
+	channel.cc channel.hh \
 	circular_buffer.hh \
 	comment.hh \
+	coverage.cc coverage.hh \
 	credentials.cc credentials.hh \
 	dns.hh dns.cc \
-	dns_random.hh dns_random.cc \
+	dns_random.hh \
 	dnsbackend.hh \
 	dnslabeltext.cc \
 	dnsname.cc dnsname.hh \
@@ -190,6 +195,7 @@ pdns_recursor_SOURCES = \
 	rpzloader.cc rpzloader.hh \
 	secpoll-recursor.cc secpoll-recursor.hh \
 	secpoll.cc secpoll.hh \
+	settings/cxxsupport.cc \
 	sha.hh \
 	sholder.hh \
 	shuffle.cc shuffle.hh \
@@ -218,9 +224,12 @@ pdns_recursor_SOURCES = \
 	zonemd.cc zonemd.hh \
 	zoneparser-tng.cc zoneparser-tng.hh
 
+nodist_pdns_recursor_SOURCES = \
+	settings/cxxsettings-generated.cc
+
 if !HAVE_LUA_HPP
 BUILT_SOURCES += lua.hpp
-nodist_pdns_recursor_SOURCES = lua.hpp
+nodist_pdns_recursor_SOURCES += lua.hpp
 endif
 
 CLEANFILES += lua.hpp
@@ -235,7 +244,9 @@ pdns_recursor_LDADD = \
 	$(RT_LIBS) \
 	$(BOOST_SYSTEM_LIBS) \
 	$(PROBDS_LIBS) \
-	$(LIBCAP_LIBS)
+	$(LIBCAP_LIBS) \
+	$(ARC4RANDOM_LIBS) \
+	$(RUST_LIBS)
 
 pdns_recursor_LDFLAGS = $(AM_LDFLAGS) \
 	$(LIBCRYPTO_LDFLAGS) $(BOOST_CONTEXT_LDFLAGS) \
@@ -249,7 +260,7 @@ pdns_recursor_LDFLAGS += \
 	$(BOOST_FILESYSTEM_LDFLAGS)
 endif
 
-rec_control_LDADD = $(LIBCRYPTO_LIBS)
+rec_control_LDADD = $(LIBCRYPTO_LIBS) $(ARC4RANDOM_LIBS) $(RUST_LIBS)
 
 rec_control_LDFLAGS = $(AM_LDFLAGS) \
 	$(LIBCRYPTO_LDFLAGS)
@@ -263,7 +274,7 @@ testrunner_SOURCES = \
 	circular_buffer.hh \
 	credentials.cc credentials.hh \
 	dns.cc dns.hh \
-	dns_random.cc dns_random.hh \
+	dns_random.hh \
 	dnslabeltext.cc \
 	dnsname.cc dnsname.hh \
 	dnsparser.hh dnsparser.cc \
@@ -306,6 +317,7 @@ testrunner_SOURCES = \
 	root-dnssec.hh \
 	rpzloader.cc rpzloader.hh \
 	secpoll.cc \
+	settings/cxxsupport.cc \
 	sholder.hh \
 	sillyrecords.cc \
 	sstuff.hh \
@@ -344,6 +356,7 @@ testrunner_SOURCES = \
 	test-reczones-helpers.cc \
 	test-rpzloader_cc.cc \
 	test-secpoll_cc.cc \
+	test-settings.cc \
 	test-signers.cc \
 	test-syncres_cc.cc \
 	test-syncres_cc.hh \
@@ -367,6 +380,9 @@ testrunner_SOURCES = \
 	zonemd.cc zonemd.hh \
 	zoneparser-tng.cc zoneparser-tng.hh
 
+nodist_testrunner_SOURCES = \
+	settings/cxxsettings-generated.cc
+
 testrunner_LDFLAGS = \
 	$(AM_LDFLAGS) \
 	$(BOOST_CONTEXT_LDFLAGS) \
@@ -381,7 +397,9 @@ testrunner_LDADD = \
 	$(RT_LIBS) \
 	$(BOOST_SYSTEM_LIBS) \
 	$(PROBDS_LIBS) \
-	$(LIBCAP_LIBS)
+	$(LIBCAP_LIBS) \
+	$(ARC4RANDOM_LIBS) \
+	$(RUST_LIBS)
 
 if NOD_ENABLED
 testrunner_SOURCES +=   nod.hh nod.cc \
@@ -493,7 +511,11 @@ rec_control_SOURCES = \
 	qtype.cc \
 	rec_channel.cc rec_channel.hh \
 	rec_control.cc \
+	settings/cxxsupport.cc \
 	unix_utility.cc
+
+nodist_rec_control_SOURCES = \
+	settings/cxxsettings-generated.cc
 
 dnslabeltext.cc: dnslabeltext.rl
 	$(AM_V_GEN)$(RAGEL) $< -o dnslabeltext.cc
@@ -508,10 +530,13 @@ pubsuffix.cc: $(srcdir)/effective_tld_names.dat
 	$(AM_V_GEN)./mkpubsuffixcc
 
 ## Config file
-sysconf_DATA = recursor.conf-dist
+sysconf_DATA = recursor.conf-dist recursor.yml-dist
 
 recursor.conf-dist: pdns_recursor
 	$(AM_V_GEN)./pdns_recursor --config=default > $@
+
+recursor.yml-dist: pdns_recursor
+	dir=$$(mktemp -d) && touch "$$dir/recursor.yml" && ./pdns_recursor --config-dir="$$dir" --config=default 2> /dev/null > $@ && rm "$$dir/recursor.yml" && rmdir "$$dir"
 
 ## Manpages
 MANPAGES=pdns_recursor.1 \

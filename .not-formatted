@@ -4,8 +4,6 @@
 ./ext/lmdb-safe/lmdb-typed.hh
 ./ext/probds/murmur3.cc
 ./pdns/anadns.hh
-./pdns/arguments.cc
-./pdns/arguments.hh
 ./pdns/auth-caches.cc
 ./pdns/auth-carbon.cc
 ./pdns/auth-packetcache.cc
@@ -38,8 +36,6 @@
 ./pdns/distributor.hh
 ./pdns/dns.cc
 ./pdns/dns.hh
-./pdns/dns_random.cc
-./pdns/dns_random.hh
 ./pdns/dnsbackend.cc
 ./pdns/dnsbackend.hh
 ./pdns/dnsbulktest.cc
@@ -78,8 +74,6 @@
 ./pdns/dnsdistdist/connection-management.hh
 ./pdns/dnsdistdist/dnsdist-backend.cc
 ./pdns/dnsdistdist/dnsdist-dynblocks.cc
-./pdns/dnsdistdist/dnsdist-healthchecks.cc
-./pdns/dnsdistdist/dnsdist-healthchecks.hh
 ./pdns/dnsdistdist/dnsdist-kvs.cc
 ./pdns/dnsdistdist/dnsdist-kvs.hh
 ./pdns/dnsdistdist/dnsdist-lbpolicies.cc
@@ -155,11 +149,6 @@
 ./pdns/ednssubnet.hh
 ./pdns/fstrm_logger.cc
 ./pdns/fstrm_logger.hh
-./pdns/fuzz_dnsdistcache.cc
-./pdns/fuzz_moadnsparser.cc
-./pdns/fuzz_packetcache.cc
-./pdns/fuzz_proxyprotocol.cc
-./pdns/fuzz_zoneparsertng.cc
 ./pdns/gettime.cc
 ./pdns/gettime.hh
 ./pdns/histog.hh
@@ -270,7 +259,6 @@
 ./pdns/test-common.hh
 ./pdns/test-digests_hh.cc
 ./pdns/test-distributor_hh.cc
-./pdns/test-dns_random_hh.cc
 ./pdns/test-dnscrypt_cc.cc
 ./pdns/test-dnsdist_cc.cc
 ./pdns/test-dnsdistpacketcache_cc.cc

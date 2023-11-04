@@ -180,7 +180,7 @@ void openssl_seed()
 
   unsigned int r;
   for (int i = 0; i < 1024; i += 4) {
-    r = dns_random(0xffffffff);
+    r = dns_random_uint32();
     entropy.append((const char*)&r, 4);
   }
 
@@ -1843,7 +1843,7 @@ int OpenSSLEDDSADNSCryptoKeyEngine::getBits() const
   return (int)d_len << 3;
 }
 
-bool OpenSSLEDDSADNSCryptoKeyEngine::checkKey(std::optional<std::reference_wrapper<std::vector<std::string>>> errorMessages) const
+bool OpenSSLEDDSADNSCryptoKeyEngine::checkKey([[maybe_unused]] std::optional<std::reference_wrapper<std::vector<std::string>>> errorMessages) const
 {
 #if OPENSSL_VERSION_MAJOR >= 3
   auto ctx = KeyContext{EVP_PKEY_CTX_new_from_pkey(nullptr, d_edkey.get(), nullptr), EVP_PKEY_CTX_free};

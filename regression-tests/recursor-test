@@ -31,7 +31,7 @@ rm -f recursor.pid pdns_recursor.pid
 <measurement><name>system CPU seconds</name><value>%S</value></measurement>
 <measurement><name>wallclock seconds</name><value>%e</value></measurement>
 <measurement><name>%% CPU used</name><value>%P</value></measurement>
-'         ${RECURSOR} --daemon=no --local-port=$port --socket-dir=./ --trace=$TRACE --config-dir=. --max-mthreads=$mthreads --query-local-address="0.0.0.0${QLA6}" --threads=$threads --record-cache-shards=$shards --disable-packetcache --refresh-on-ttl-perc=10 --dnssec=validate > recursor.log 2>&1 &
+'         ${RECURSOR} --daemon=no --local-port=$port --socket-dir=./ --trace=$TRACE --config-dir=. --max-mthreads=$mthreads --query-local-address="0.0.0.0${QLA6}" --threads=$threads --record-cache-shards=$shards --refresh-on-ttl-perc=10 --dnssec=validate --pdns-distributes-queries --reuseport=no > recursor.log 2>&1 &
 sleep 3
 if [ ! -e pdns_recursor.pid ]; then
         cat recursor.log
@@ -85,11 +85,12 @@ touch failed_tests passed_tests
 
 ANANSWER=$[(100*(${DBT_QUEUED}-${DBT_ERRORS}-${DBT_TIMEOUTS}) )/${DBT_QUEUED}]
 
-if [ "$ANANSWER" -ge $THRESHOLD ]
+if [ $ANANSWER -ge $THRESHOLD ]
 then
-        echo recursor-bulktest >> passed_tests
-        RETVAL=0
+    echo recursor-bulktest >> passed_tests
+    RETVAL=0
 else
+    echo "::error title=Recursor-bulktest::Bulk test failed: less than ${THRESHOLD}% of queries answered successfully"
     echo recursor-bulktest >> failed_tests
     RETVAL=1
 fi

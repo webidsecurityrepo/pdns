@@ -95,7 +95,7 @@ inline std::string keyConv(const T& t)
 
 
 namespace {
-  MDBOutVal getKeyFromCombinedKey(MDBInVal combined) {
+  inline MDBOutVal getKeyFromCombinedKey(MDBInVal combined) {
     if (combined.d_mdbval.mv_size < sizeof(uint32_t)) {
       throw std::runtime_error("combined key too short to get ID from");
     }
@@ -107,7 +107,7 @@ namespace {
     return ret;
   }
 
-  MDBOutVal getIDFromCombinedKey(MDBInVal combined) {
+  inline MDBOutVal getIDFromCombinedKey(MDBInVal combined) {
     if (combined.d_mdbval.mv_size < sizeof(uint32_t)) {
       throw std::runtime_error("combined key too short to get ID from");
     }
@@ -119,7 +119,7 @@ namespace {
     return ret;
   }
 
-  std::string makeCombinedKey(MDBInVal key, MDBInVal val)
+  inline std::string makeCombinedKey(MDBInVal key, MDBInVal val)
   {
     std::string lenprefix(sizeof(uint16_t), '\0');
     std::string skey((char*) key.d_mdbval.mv_data, key.d_mdbval.mv_size);
@@ -162,6 +162,7 @@ struct LMDBIndexOps
     auto scombined = makeCombinedKey(keyConv(d_parent->getMember(t)), id);
     MDBInVal combined(scombined);
 
+    // if the entry existed already, this will just update the timestamp/txid in the LS header. This is intentional, so objects and their indexes always get synced together.
     txn->put(d_idx, combined, empty, flags);
   }
 
@@ -237,7 +238,7 @@ class TypedDBI
 {
 public:
   TypedDBI(std::shared_ptr<MDBEnv> env, string_view name)
-    : d_env(env), d_name(name)
+    : d_env(std::move(env)), d_name(name)
   {
     d_main = d_env->openDB(name, MDB_CREATE);
 
@@ -305,7 +306,8 @@ public:
       // auto range = prefix_range<N>(key);
       LMDBIDvec ids;
 
-      get_multi<N>(key, ids);
+      // because we know we only want one item, pass onlyOldest=true to consistently get the same one out of a set of duplicates
+      get_multi<N>(key, ids, true);
 
       if (ids.size() == 0) {
         return 0;
@@ -641,7 +643,7 @@ public:
     };
 
     template<int N>
-    void get_multi(const typename std::tuple_element<N, tuple_t>::type::type& key, LMDBIDvec& ids)
+    void get_multi(const typename std::tuple_element<N, tuple_t>::type::type& key, LMDBIDvec& ids, bool onlyOldest=false)
     {
       // std::cerr<<"in get_multi"<<std::endl;
       typename Parent::cursor_t cursor = (*d_parent.d_txn)->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
@@ -653,9 +655,10 @@ public:
 
       int rc = cursor.get(out, id,  MDB_SET_RANGE);
 
-      int scanned = 0;
+      uint64_t oldestts = UINT64_MAX;
+      uint32_t oldestid = 0;
+
       while (rc == 0) {
-        scanned++;
         auto sout = out.getNoStripHeader<std::string>(); // FIXME: this (and many others) could probably be string_view
         auto thiskey = getKeyFromCombinedKey(out);
         auto sthiskey = thiskey.getNoStripHeader<std::string>();
@@ -667,13 +670,25 @@ public:
 
         if (sthiskey == keyString) {
           auto _id = getIDFromCombinedKey(out);
-          ids.push_back(_id.getNoStripHeader<uint32_t>());
+          uint64_t ts = LMDBLS::LSgetTimestamp(id.getNoStripHeader<string_view>());
+          uint32_t __id = _id.getNoStripHeader<uint32_t>();
+
+          if (onlyOldest) {
+            if (ts < oldestts) {
+              oldestts = ts;
+              oldestid = __id;
+
+              ids.clear();
+              ids.push_back(oldestid);
+            }
+          } else {
+            ids.push_back(__id);
+          }
         }
 
         rc = cursor.get(out, id, MDB_NEXT);
       }
 
-      // std::cerr<<"get_multi scanned="<<scanned<<std::endl;
       if (rc != 0 && rc != MDB_NOTFOUND) {
         throw std::runtime_error("error during get_multi");
       }

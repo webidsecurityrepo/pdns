@@ -24,6 +24,9 @@
 #endif
 #include "logger.hh"
 #include "version.hh"
+#include "dnsbackend.hh"
+
+#include <boost/algorithm/string/join.hpp>
 
 static ProductType productType;
 
@@ -67,7 +70,7 @@ string productTypeApiType() {
 
 void showProductVersion()
 {
-  g_log<<Logger::Warning<<productName()<<" "<< VERSION << " (C) 2001-2022 "
+  g_log<<Logger::Warning<<productName()<<" "<< VERSION << " (C) "
     "PowerDNS.COM BV" << endl;
   g_log<<Logger::Warning<<"Using "<<(sizeof(unsigned long)*8)<<"-bits mode. "
     "Built using " << compilerVersion()
@@ -153,7 +156,9 @@ void showBuildConfiguration()
     endl;
 #ifdef PDNS_MODULES
   // Auth only
-  g_log<<Logger::Warning<<"Built-in modules: "<<PDNS_MODULES<<endl;
+  g_log << Logger::Warning << "Built-in modules: " << PDNS_MODULES << endl;
+  const auto& modules = BackendMakers().getModules();
+  g_log << Logger::Warning << "Loaded modules: " << boost::join(modules, " ") << endl;
 #endif
 #ifdef PDNS_CONFIG_ARGS
 #define double_escape(s) #s

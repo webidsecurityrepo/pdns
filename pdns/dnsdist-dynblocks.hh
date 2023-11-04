@@ -28,7 +28,9 @@
 #include "dnsdist-rings.hh"
 #include "statnode.hh"
 
-#include "dnsdist-lua-inspection-ffi.hh"
+extern "C" {
+#include "dnsdist-lua-inspection-ffi.h"
+}
 
 // dnsdist_ffi_stat_node_t is a lightuserdata
 template<>
@@ -262,13 +264,13 @@ public:
   void setSuffixMatchRule(unsigned int seconds, const std::string& reason, unsigned int blockDuration, DNSAction::Action action, smtVisitor_t visitor)
   {
     d_suffixMatchRule = DynBlockRule(reason, blockDuration, 0, 0, seconds, action);
-    d_smtVisitor = visitor;
+    d_smtVisitor = std::move(visitor);
   }
 
   void setSuffixMatchRuleFFI(unsigned int seconds, const std::string& reason, unsigned int blockDuration, DNSAction::Action action, dnsdist_ffi_stat_node_visitor_t visitor)
   {
     d_suffixMatchRule = DynBlockRule(reason, blockDuration, 0, 0, seconds, action);
-    d_smtVisitorFFI = visitor;
+    d_smtVisitorFFI = std::move(visitor);
   }
 
   void setMasks(uint8_t v4, uint8_t v6, uint8_t port)

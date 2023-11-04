@@ -422,20 +422,20 @@ void TCPNameserver::doConnection(int fd)
   }
   catch(PDNSException &ae) {
     s_P.lock()->reset(); // on next call, backend will be recycled
-    g_log<<Logger::Error<<"TCP nameserver had error, cycling backend: "<<ae.reason<<endl;
+    g_log << Logger::Error << "TCP Connection Thread for client " << remote << " failed, cycling backend: " << ae.reason << endl;
   }
   catch(NetworkError &e) {
-    g_log<<Logger::Info<<"TCP Connection Thread died because of network error: "<<e.what()<<endl;
+    g_log << Logger::Info << "TCP Connection Thread for client " << remote << " died because of network error: " << e.what() << endl;
   }
 
   catch(std::exception &e) {
     s_P.lock()->reset(); // on next call, backend will be recycled
-    g_log << Logger::Error << "TCP Connection Thread died because of STL error, cycling backend: " << e.what() << endl;
+    g_log << Logger::Error << "TCP Connection Thread for client " << remote << " died because of STL error, cycling backend: " << e.what() << endl;
   }
   catch( ... )
   {
     s_P.lock()->reset(); // on next call, backend will be recycled
-    g_log << Logger::Error << "TCP Connection Thread caught unknown exception, cycling backend." << endl;
+    g_log << Logger::Error << "TCP Connection Thread for client " << remote << " caught unknown exception, cycling backend." << endl;
   }
   d_connectionroom_sem->post();
 
@@ -443,7 +443,7 @@ void TCPNameserver::doConnection(int fd)
     closesocket(fd);
   }
   catch(const PDNSException& e) {
-    g_log<<Logger::Error<<"Error closing TCP socket: "<<e.reason<<endl;
+    g_log << Logger::Error << "Error closing TCP socket for client " << remote << ": " << e.reason << endl;
   }
   decrementClientCount(remote);
 }
@@ -582,9 +582,9 @@ namespace {
 
 
 /** do the actual zone transfer. Return 0 in case of error, 1 in case of success */
-int TCPNameserver::doAXFR(const DNSName &target, std::unique_ptr<DNSPacket>& q, int outsock)
+int TCPNameserver::doAXFR(const DNSName &target, std::unique_ptr<DNSPacket>& q, int outsock)  // NOLINT(readability-function-cognitive-complexity)
 {
-  string logPrefix="AXFR-out zone '"+target.toLogString()+"', client '"+q->getRemoteString()+"', ";
+  string logPrefix="AXFR-out zone '"+target.toLogString()+"', client '"+q->getRemoteStringWithPort()+"', ";
 
   std::unique_ptr<DNSPacket> outpacket= getFreshAXFRPacket(q);
   if(q->d_dnssecOk)
@@ -823,15 +823,25 @@ int TCPNameserver::doAXFR(const DNSName &target, std::unique_ptr<DNSPacket>& q, 
     }
     zrr.dr.d_name.makeUsLowerCase();
     if(zrr.dr.d_name.isPartOf(target)) {
-      if (zrr.dr.d_type == QType::ALIAS && ::arg().mustDo("outgoing-axfr-expand-alias")) {
+      if (zrr.dr.d_type == QType::ALIAS && (::arg().mustDo("outgoing-axfr-expand-alias") || ::arg()["outgoing-axfr-expand-alias"] == "ignore-errors")) {
         vector<DNSZoneRecord> ips;
         int ret1 = stubDoResolve(getRR<ALIASRecordContent>(zrr.dr)->getContent(), QType::A, ips);
         int ret2 = stubDoResolve(getRR<ALIASRecordContent>(zrr.dr)->getContent(), QType::AAAA, ips);
-        if(ret1 != RCode::NoError || ret2 != RCode::NoError) {
-          g_log<<Logger::Warning<<logPrefix<<"error resolving for ALIAS "<<zrr.dr.getContent()->getZoneRepresentation()<<", aborting AXFR"<<endl;
-          outpacket->setRcode(RCode::ServFail);
-          sendPacket(outpacket,outsock);
-          return 0;
+        if (ret1 != RCode::NoError || ret2 != RCode::NoError) {
+          if (::arg()["outgoing-axfr-expand-alias"] == "ignore-errors") {
+            if (ret1 != RCode::NoError) {
+              g_log << Logger::Error << logPrefix << zrr.dr.d_name.toLogString() << ": error resolving A record for ALIAS target " << zrr.dr.getContent()->getZoneRepresentation() << ", continuing AXFR" << endl;
+            }
+            if (ret2 != RCode::NoError) {
+              g_log << Logger::Error << logPrefix << zrr.dr.d_name.toLogString() << ": error resolving AAAA record for ALIAS target " << zrr.dr.getContent()->getZoneRepresentation() << ", continuing AXFR" << endl;
+            }
+          }
+          else {
+            g_log << Logger::Warning << logPrefix << zrr.dr.d_name.toLogString() << ": error resolving for ALIAS " << zrr.dr.getContent()->getZoneRepresentation() << ", aborting AXFR" << endl;
+            outpacket->setRcode(RCode::ServFail);
+            sendPacket(outpacket, outsock);
+            return 0;
+          }
         }
         for (auto& ip: ips) {
           zrr.dr.d_type = ip.dr.d_type;
@@ -987,15 +997,13 @@ send:
   typedef map<DNSName, NSECXEntry, CanonDNSNameCompare> nsecxrepo_t;
   nsecxrepo_t nsecxrepo;
 
-  ChunkedSigningPipe csp(target, (securedZone && !presignedZone), ::arg().asNum("signing-threads", 1));
+  ChunkedSigningPipe csp(target, (securedZone && !presignedZone), ::arg().asNum("signing-threads", 1), ::arg().mustDo("workaround-11804") ? 1 : 100);
 
   DNSName keyname;
   unsigned int udiff;
   DTime dt;
   dt.set();
-  int records=0;
   for(DNSZoneRecord &loopZRR :  zrrs) {
-    records++;
     if(securedZone && (loopZRR.auth || loopZRR.dr.d_type == QType::NS)) {
       if (NSEC3Zone || loopZRR.dr.d_type) {
         if (presignedZone && NSEC3Zone && loopZRR.dr.d_type == QType::RRSIG && getRR<RRSIGRecordContent>(loopZRR.dr)->d_type == QType::NSEC3) {
@@ -1166,7 +1174,7 @@ send:
 
 int TCPNameserver::doIXFR(std::unique_ptr<DNSPacket>& q, int outsock)
 {
-  string logPrefix="IXFR-out zone '"+q->qdomain.toLogString()+"', client '"+q->getRemoteString()+"', ";
+  string logPrefix="IXFR-out zone '"+q->qdomain.toLogString()+"', client '"+q->getRemoteStringWithPort()+"', ";
 
   std::unique_ptr<DNSPacket> outpacket=getFreshAXFRPacket(q);
   if(q->d_dnssecOk)

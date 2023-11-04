@@ -7,6 +7,7 @@ These are all the functions, objects and methods related to the :doc:`../advance
 
   This is the eBPF equivalent of :func:`addDynBlocks`, blocking a set of addresses for (optionally) a number of seconds, using an eBPF dynamic filter.
   The default number of seconds to block for is 10.
+  Since 1.6.0, the use of a :ref:`DynBlockRulesGroup` is a much more efficient way of doing the same thing.
 
   :param addresses: set of Addresses as returned by an :ref:`exceed function <exceedfuncs>`
   :param DynBPFFilter dynbpf: The dynamic eBPF filter to use
@@ -28,6 +29,7 @@ These are all the functions, objects and methods related to the :doc:`../advance
   :param table options: A table with key: value pairs with options.
 
   Options:
+
   * ``ipv4MaxItems``: int - The maximum number of entries in the IPv4 map. Default is 0 which will not allow any entry at all.
   * ``ipv4PinnedPath``: str - The filesystem path this map should be pinned to.
   * ``ipv6MaxItems``: int - The maximum number of entries in the IPv6 map. Default is 0 which will not allow any entry at all.
@@ -38,7 +40,7 @@ These are all the functions, objects and methods related to the :doc:`../advance
   * ``cidr6PinnedPath``: str - The filesystem path this map should be pinned to.
   * ``qnamesMaxItems``: int - The maximum number of entries in the qname map. Default is 0 which will not allow any entry at all.
   * ``qnamesPinnedPath``: str - The filesystem path this map should be pinned to.
-  * ``external``: bool - If set to true, DNSDist can to load the internal eBPF program.
+  * ``external``: bool - If set to true, DNSDist does not load the internal eBPF program.
 
 .. function:: newDynBPFFilter(bpf) -> DynBPFFilter
 

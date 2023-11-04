@@ -236,8 +236,8 @@ void doClient(ComboAddress server, const std::string& command)
   SodiumNonce theirs, ours, readingNonce, writingNonce;
   ours.init();
 
-  writen2(fd.getHandle(), (const char*)ours.value, sizeof(ours.value));
-  readn2(fd.getHandle(), (char*)theirs.value, sizeof(theirs.value));
+  writen2(fd.getHandle(), ours.value.data(), ours.value.size());
+  readn2(fd.getHandle(), theirs.value.data(), theirs.value.size());
   readingNonce.merge(ours, theirs);
   writingNonce.merge(theirs, ours);
 
@@ -470,6 +470,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "addConsoleACL", true, "netmask", "add a netmask to the console ACL" },
   { "addDNSCryptBind", true, "\"127.0.0.1:8443\", \"provider name\", \"/path/to/resolver.cert\", \"/path/to/resolver.key\", {reusePort=false, tcpFastOpenQueueSize=0, interface=\"\", cpus={}}", "listen to incoming DNSCrypt queries on 127.0.0.1 port 8443, with a provider name of `provider name`, using a resolver certificate and associated key stored respectively in the `resolver.cert` and `resolver.key` files. The fifth optional parameter is a table of parameters" },
   { "addDOHLocal", true, "addr, certFile, keyFile [, urls [, vars]]", "listen to incoming DNS over HTTPS queries on the specified address using the specified certificate and key. The last two parameters are tables" },
+  { "addDOQLocal", true, "addr, certFile, keyFile [, vars]", "listen to incoming DNS over QUIC queries on the specified address using the specified certificate and key. The last parameter is a table" },
   { "addDynBlocks", true, "addresses, message[, seconds[, action]]", "block the set of addresses with message `msg`, for `seconds` seconds (10 by default), applying `action` (default to the one set with `setDynBlocksAction()`)" },
   { "addDynBlockSMT", true, "names, message[, seconds [, action]]", "block the set of names with message `msg`, for `seconds` seconds (10 by default), applying `action` (default to the one set with `setDynBlocksAction()`)" },
   { "addLocal", true, "addr [, {doTCP=true, reusePort=false, tcpFastOpenQueueSize=0, interface=\"\", cpus={}}]", "add `addr` to the list of addresses we listen on" },
@@ -519,6 +520,8 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "getAction", true, "n", "Returns the Action associated with rule n" },
   { "getBind", true, "n", "returns the listener at index n" },
   { "getBindCount", true, "", "returns the number of listeners all kinds" },
+  { "getCacheHitResponseRule", true, "selector", "Return the cache-hit response rule corresponding to the selector, if any" },
+  { "getCacheInsertedResponseRule", true, "selector", "Return the cache-inserted response rule corresponding to the selector, if any" },
   { "getCurrentTime", true, "", "returns the current time" },
   { "getDNSCryptBind", true, "n", "return the `DNSCryptContext` object corresponding to the bind `n`" },
   { "getDNSCryptBindCount", true, "", "returns the number of DNSCrypt listeners" },
@@ -535,7 +538,10 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "getPoolNames", true, "", "returns a table with all the pool names" },
   { "getQueryCounters", true, "[max=10]", "show current buffer of query counters, limited by 'max' if provided" },
   { "getResponseRing", true, "", "return the current content of the response ring" },
+  { "getResponseRule", true, "selector", "Return the response rule corresponding to the selector, if any" },
   { "getRespRing", true, "", "return the qname/rcode content of the response ring" },
+  { "getRule", true, "selector", "Return the rule corresponding to the selector, if any" },
+  { "getSelfAnsweredResponseRule", true, "selector", "Return the self-answered response rule corresponding to the selector, if any" },
   { "getServer", true, "id", "returns server with index 'n' or whose uuid matches if 'id' is an UUID string" },
   { "getServers", true, "", "returns a table with all defined servers" },
   { "getStatisticsCounters", true, "", "returns a map of statistic counters" },
@@ -548,7 +554,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "getTLSFrontend", true, "n", "returns the TLS frontend with index n" },
   { "getTLSFrontendCount", true, "", "returns the number of DoT listeners" },
   { "getVerbose", true, "", "get whether log messages at the verbose level will be logged" },
-  { "grepq", true, "Netmask|DNS Name|100ms|{\"::1\", \"powerdns.com\", \"100ms\"} [, n]", "shows the last n queries and responses matching the specified client address or range (Netmask), or the specified DNS Name, or slower than 100ms" },
+  { "grepq", true, "Netmask|DNS Name|100ms|{\"::1\", \"powerdns.com\", \"100ms\"} [, n] [,options]", "shows the last n queries and responses matching the specified client address or range (Netmask), or the specified DNS Name, or slower than 100ms" },
   { "hashPassword", true, "password [, workFactor]", "Returns a hashed and salted version of the supplied password, usable with 'setWebserverConfig()'"},
   { "HTTPHeaderRule", true, "name, regex", "matches DoH queries with a HTTP header 'name' whose content matches the regular expression 'regex'"},
   { "HTTPPathRegexRule", true, "regex", "matches DoH queries whose HTTP path matches 'regex'"},
@@ -627,7 +633,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "NotRule", true, "selector", "Matches the traffic if the selector rule does not match" },
   { "OpcodeRule", true, "code", "Matches queries with opcode code. code can be directly specified as an integer, or one of the built-in DNSOpcodes" },
   { "OrRule", true, "selectors", "Matches the traffic if one or more of the the selectors rules does match" },
-  { "PoolAction", true, "poolname", "set the packet into the specified pool" },
+  { "PoolAction", true, "poolname [, stop]", "set the packet into the specified pool" },
   { "PoolAvailableRule", true, "poolname", "Check whether a pool has any servers available to handle queries" },
   { "PoolOutstandingRule", true, "poolname, limit", "Check whether a pool has outstanding queries above limit" },
   { "printDNSCryptProviderFingerprint", true, "\"/path/to/providerPublic.key\"", "display the fingerprint of the provided resolver public key" },
@@ -639,7 +645,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "QNameSetRule", true, "set", "Matches if the set contains exact qname" },
   { "QNameWireLengthRule", true, "min, max", "matches if the qname's length on the wire is less than `min` or more than `max` bytes" },
   { "QPSAction", true, "maxqps", "Drop a packet if it does exceed the maxqps queries per second limits. Letting the subsequent rules apply otherwise" },
-  { "QPSPoolAction", true, "maxqps, poolname", "Send the packet into the specified pool only if it does not exceed the maxqps queries per second limits. Letting the subsequent rules apply otherwise" },
+  { "QPSPoolAction", true, "maxqps, poolname [, stop]", "Send the packet into the specified pool only if it does not exceed the maxqps queries per second limits. Letting the subsequent rules apply otherwise" },
   { "QTypeRule", true, "qtype", "matches queries with the specified qtype" },
   { "RCodeAction", true, "rcode", "Reply immediately by turning the query into a response with the specified rcode" },
   { "RCodeRule", true, "rcode", "matches responses with the specified rcode" },
@@ -741,6 +747,7 @@ const std::vector<ConsoleKeyword> g_consoleKeywords{
   { "showDNSCryptBinds", true, "", "display the currently configured DNSCrypt binds" },
   { "showDOHFrontends", true, "", "list all the available DOH frontends" },
   { "showDOHResponseCodes", true, "", "show the HTTP response code statistics for the DoH frontends"},
+  { "showDOQFrontends", true, "", "list all the available DOQ frontends" },
   { "showDynBlocks", true, "", "show dynamic blocks in force" },
   { "showPools", true, "", "show the available pools" },
   { "showPoolServerPolicy", true, "pool", "show server selection policy for this pool" },
@@ -861,8 +868,8 @@ static void controlClientThread(ConsoleConnection&& conn)
 
     SodiumNonce theirs, ours, readingNonce, writingNonce;
     ours.init();
-    readn2(conn.getFD(), (char*)theirs.value, sizeof(theirs.value));
-    writen2(conn.getFD(), (char*)ours.value, sizeof(ours.value));
+    readn2(conn.getFD(), theirs.value.data(), theirs.value.size());
+    writen2(conn.getFD(), ours.value.data(), ours.value.size());
     readingNonce.merge(ours, theirs);
     writingNonce.merge(theirs, ours);
 
@@ -983,7 +990,7 @@ static void controlClientThread(ConsoleConnection&& conn)
     }
   }
   catch (const std::exception& e) {
-    errlog("Got an exception in client connection from %s: %s", conn.getClient().toStringWithPort(), e.what());
+    infolog("Got an exception in client connection from %s: %s", conn.getClient().toStringWithPort(), e.what());
   }
 }
 
@@ -1021,7 +1028,7 @@ void controlThread(int fd, ComboAddress local)
         t.detach();
       }
       catch (const std::exception& e) {
-        errlog("Control connection died: %s", e.what());
+        infolog("Control connection died: %s", e.what());
       }
     }
   }

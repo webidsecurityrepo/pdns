@@ -56,6 +56,7 @@
 #include <boost/format.hpp>
 #include "iputils.hh"
 #include "dnsparser.hh"
+#include "dns_random.hh"
 #include <pwd.h>
 #include <grp.h>
 #include <climits>
@@ -432,41 +433,46 @@ int waitForMultiData(const set<int>& fds, const int seconds, const int useconds,
     }
   }
   set<int>::const_iterator it(pollinFDs.begin());
-  advance(it, random() % pollinFDs.size());
+  advance(it, dns_random(pollinFDs.size()));
   *fdOut = *it;
   return 1;
 }
 
 // returns -1 in case of error, 0 if no data is available, 1 if there is. In the first two cases, errno is set
-int waitFor2Data(int fd1, int fd2, int seconds, int useconds, int*fd)
+int waitFor2Data(int fd1, int fd2, int seconds, int useconds, int* fdPtr)
 {
-  int ret;
-
-  struct pollfd pfds[2];
-  memset(&pfds[0], 0, 2*sizeof(struct pollfd));
+  std::array<pollfd,2> pfds{};
+  memset(pfds.data(), 0, pfds.size() * sizeof(struct pollfd));
   pfds[0].fd = fd1;
   pfds[1].fd = fd2;
 
   pfds[0].events= pfds[1].events = POLLIN;
 
-  int nsocks = 1 + (fd2 >= 0); // fd2 can optionally be -1
+  int nsocks = 1 + static_cast<int>(fd2 >= 0); // fd2 can optionally be -1
 
-  if(seconds >= 0)
-    ret = poll(pfds, nsocks, seconds * 1000 + useconds/1000);
-  else
-    ret = poll(pfds, nsocks, -1);
-  if(!ret || ret < 0)
-    return ret;
-
-  if((pfds[0].revents & POLLIN) && !(pfds[1].revents & POLLIN))
-    *fd = pfds[0].fd;
-  else if((pfds[1].revents & POLLIN) && !(pfds[0].revents & POLLIN))
-    *fd = pfds[1].fd;
-  else if(ret == 2) {
-    *fd = pfds[random()%2].fd;
+  int ret{};
+  if (seconds >= 0) {
+    ret = poll(pfds.data(), nsocks, seconds * 1000 + useconds / 1000);
   }
-  else
-    *fd = -1; // should never happen
+  else {
+    ret = poll(pfds.data(), nsocks, -1);
+  }
+  if (ret <= 0) {
+    return ret;
+  }
+
+  if ((pfds[0].revents & POLLIN) != 0 && (pfds[1].revents & POLLIN) == 0) {
+    *fdPtr = pfds[0].fd;
+  }
+  else if ((pfds[1].revents & POLLIN) != 0 && (pfds[0].revents & POLLIN) == 0) {
+    *fdPtr = pfds[1].fd;
+  }
+  else if(ret == 2) {
+    *fdPtr = pfds.at(dns_random_uint32() % 2).fd;
+  }
+  else {
+    *fdPtr = -1; // should never happen
+  }
 
   return 1;
 }
@@ -1014,7 +1020,7 @@ bool isNonBlocking(int sock)
   return flags & O_NONBLOCK;
 }
 
-bool setReceiveSocketErrors(int sock, int af)
+bool setReceiveSocketErrors([[maybe_unused]] int sock, [[maybe_unused]] int af)
 {
 #ifdef __linux__
   int tmp = 1, ret;
@@ -1159,7 +1165,7 @@ int getMACAddress(const ComboAddress& ca, char* dest, size_t destLen)
   return foundMAC ? 0 : ENOENT;
 }
 #else
-int getMACAddress(const ComboAddress& ca, char* dest, size_t len)
+int getMACAddress(const ComboAddress& /* ca */, char* /* dest */, size_t /* len */)
 {
   return ENOENT;
 }
@@ -1175,7 +1181,7 @@ string getMACAddress(const ComboAddress& ca)
   return ret;
 }
 
-uint64_t udpErrorStats(const std::string& str)
+uint64_t udpErrorStats([[maybe_unused]] const std::string& str)
 {
 #ifdef __linux__
   ifstream ifs("/proc/net/snmp");
@@ -1217,7 +1223,7 @@ uint64_t udpErrorStats(const std::string& str)
   return 0;
 }
 
-uint64_t udp6ErrorStats(const std::string& str)
+uint64_t udp6ErrorStats([[maybe_unused]] const std::string& str)
 {
 #ifdef __linux__
   const std::map<std::string, std::string> keys = {
@@ -1545,7 +1551,7 @@ bool isSettingThreadCPUAffinitySupported()
 #endif
 }
 
-int mapThreadToCPUList(pthread_t tid, const std::set<int>& cpus)
+int mapThreadToCPUList([[maybe_unused]] pthread_t tid, [[maybe_unused]] const std::set<int>& cpus)
 {
 #ifdef HAVE_PTHREAD_SETAFFINITY_NP
 #  ifdef __NetBSD__
@@ -1613,7 +1619,7 @@ std::vector<ComboAddress> getResolvers(const std::string& resolvConfPath)
   return results;
 }
 
-size_t getPipeBufferSize(int fd)
+size_t getPipeBufferSize([[maybe_unused]] int fd)
 {
 #ifdef F_GETPIPE_SZ
   int res = fcntl(fd, F_GETPIPE_SZ);
@@ -1627,7 +1633,7 @@ size_t getPipeBufferSize(int fd)
 #endif /* F_GETPIPE_SZ */
 }
 
-bool setPipeBufferSize(int fd, size_t size)
+bool setPipeBufferSize([[maybe_unused]] int fd, [[maybe_unused]] size_t size)
 {
 #ifdef F_SETPIPE_SZ
   if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {

@@ -22,6 +22,7 @@
 #include "lua-recursor4.hh"
 #include <fstream>
 #include "logger.hh"
+#include "logging.hh"
 #include "dnsparser.hh"
 #include "syncres.hh"
 #include "namespaces.hh"
@@ -140,7 +141,7 @@ void RecursorLua4::DNSQuestion::addRecord(uint16_t type, const std::string& cont
 
 void RecursorLua4::DNSQuestion::addAnswer(uint16_t type, const std::string& content, boost::optional<int> ttl, boost::optional<string> name)
 {
-  addRecord(type, content, DNSResourceRecord::ANSWER, ttl, name);
+  addRecord(type, content, DNSResourceRecord::ANSWER, ttl, std::move(name));
 }
 
 struct DynMetric
@@ -156,13 +157,13 @@ struct DynMetric
 
 void RecursorLua4::postPrepareContext()
 {
-  d_lw->registerMember<const DNSName (DNSQuestion::*)>("qname", [](const DNSQuestion& dq) -> const DNSName& { return dq.qname; }, [](DNSQuestion& dq, const DNSName& newName) { (void) newName; });
-  d_lw->registerMember<uint16_t (DNSQuestion::*)>("qtype", [](const DNSQuestion& dq) -> uint16_t { return dq.qtype; }, [](DNSQuestion& dq, uint16_t newType) { (void) newType; });
-  d_lw->registerMember<bool (DNSQuestion::*)>("isTcp", [](const DNSQuestion& dq) -> bool { return dq.isTcp; }, [](DNSQuestion& dq, bool newTcp) { (void) newTcp; });
-  d_lw->registerMember<const ComboAddress (DNSQuestion::*)>("localaddr", [](const DNSQuestion& dq) -> const ComboAddress& { return dq.local; }, [](DNSQuestion& dq, const ComboAddress& newLocal) { (void) newLocal; });
-  d_lw->registerMember<const ComboAddress (DNSQuestion::*)>("remoteaddr", [](const DNSQuestion& dq) -> const ComboAddress& { return dq.remote; }, [](DNSQuestion& dq, const ComboAddress& newRemote) { (void) newRemote; });
-  d_lw->registerMember<uint8_t (DNSQuestion::*)>("validationState", [](const DNSQuestion& dq) -> uint8_t { return (vStateIsBogus(dq.validationState) ? /* in order not to break older scripts */ static_cast<uint8_t>(255) : static_cast<uint8_t>(dq.validationState)); }, [](DNSQuestion& dq, uint8_t newState) { (void) newState; });
-  d_lw->registerMember<vState (DNSQuestion::*)>("detailedValidationState", [](const DNSQuestion& dq) -> vState { return dq.validationState; }, [](DNSQuestion& dq, vState newState) { (void) newState; });
+  d_lw->registerMember<const DNSName (DNSQuestion::*)>("qname", [](const DNSQuestion& dq) -> const DNSName& { return dq.qname; }, [](DNSQuestion& /* dq */, const DNSName& newName) { (void) newName; });
+  d_lw->registerMember<uint16_t (DNSQuestion::*)>("qtype", [](const DNSQuestion& dq) -> uint16_t { return dq.qtype; }, [](DNSQuestion& /* dq */, uint16_t newType) { (void) newType; });
+  d_lw->registerMember<bool (DNSQuestion::*)>("isTcp", [](const DNSQuestion& dq) -> bool { return dq.isTcp; }, [](DNSQuestion& /* dq */, bool newTcp) { (void) newTcp; });
+  d_lw->registerMember<const ComboAddress (DNSQuestion::*)>("localaddr", [](const DNSQuestion& dq) -> const ComboAddress& { return dq.local; }, [](DNSQuestion& /* dq */, const ComboAddress& newLocal) { (void) newLocal; });
+  d_lw->registerMember<const ComboAddress (DNSQuestion::*)>("remoteaddr", [](const DNSQuestion& dq) -> const ComboAddress& { return dq.remote; }, [](DNSQuestion& /* dq */, const ComboAddress& newRemote) { (void) newRemote; });
+  d_lw->registerMember<uint8_t (DNSQuestion::*)>("validationState", [](const DNSQuestion& dq) -> uint8_t { return (vStateIsBogus(dq.validationState) ? /* in order not to break older scripts */ static_cast<uint8_t>(255) : static_cast<uint8_t>(dq.validationState)); }, [](DNSQuestion& /* dq */, uint8_t newState) { (void) newState; });
+  d_lw->registerMember<vState (DNSQuestion::*)>("detailedValidationState", [](const DNSQuestion& dq) -> vState { return dq.validationState; }, [](DNSQuestion& /* dq */, vState newState) { (void) newState; });
 
   d_lw->registerMember<bool (DNSQuestion::*)>("variable", [](const DNSQuestion& dq) -> bool { return dq.variable; }, [](DNSQuestion& dq, bool newVariable) { dq.variable = newVariable; });
   d_lw->registerMember<bool (DNSQuestion::*)>("wantsRPZ", [](const DNSQuestion& dq) -> bool { return dq.wantsRPZ; }, [](DNSQuestion& dq, bool newWantsRPZ) { dq.wantsRPZ = newWantsRPZ; });
@@ -274,7 +275,7 @@ void RecursorLua4::postPrepareContext()
       }
       return result;
     },
-    [](EDNSOptionView& option, uint16_t newSize) { (void) newSize; });
+    [](EDNSOptionView& /* option */, uint16_t newSize) { (void) newSize; });
   d_lw->registerFunction<std::string(EDNSOptionView::*)()>("getContent", [](const EDNSOptionView& option) {
       if (option.values.empty()) {
         return std::string();
@@ -346,7 +347,8 @@ void RecursorLua4::postPrepareContext()
         }
       }
       catch(std::exception& e) {
-        g_log <<Logger::Error<<e.what()<<endl;
+        SLOG(g_log <<Logger::Error<<e.what()<<endl,
+             g_slog->withName("lua")->error(Logr::Error, e.what(), "Error in call to DNSSuffixMatchGroup:add"));
       }
     }
   );
@@ -436,10 +438,10 @@ void RecursorLua4::postPrepareContext()
       return getRegisteredName(dname);
   });
 
-  d_lw->registerMember<const DNSName (PolicyEvent::*)>("qname", [](const PolicyEvent& event) -> const DNSName& { return event.qname; }, [](PolicyEvent& event, const DNSName& newName) { (void) newName; });
-  d_lw->registerMember<uint16_t (PolicyEvent::*)>("qtype", [](const PolicyEvent& event) -> uint16_t { return event.qtype.getCode(); }, [](PolicyEvent& event, uint16_t newType) { (void) newType; });
-  d_lw->registerMember<bool (PolicyEvent::*)>("isTcp", [](const PolicyEvent& event) -> bool { return event.isTcp; }, [](PolicyEvent& event, bool newTcp) { (void) newTcp; });
-  d_lw->registerMember<const ComboAddress (PolicyEvent::*)>("remote", [](const PolicyEvent& event) -> const ComboAddress& { return event.remote; }, [](PolicyEvent& event, const ComboAddress& newRemote) { (void) newRemote; });
+  d_lw->registerMember<const DNSName (PolicyEvent::*)>("qname", [](const PolicyEvent& event) -> const DNSName& { return event.qname; }, [](PolicyEvent& /* event */, const DNSName& newName) { (void) newName; });
+  d_lw->registerMember<uint16_t (PolicyEvent::*)>("qtype", [](const PolicyEvent& event) -> uint16_t { return event.qtype.getCode(); }, [](PolicyEvent& /* event */, uint16_t newType) { (void) newType; });
+  d_lw->registerMember<bool (PolicyEvent::*)>("isTcp", [](const PolicyEvent& event) -> bool { return event.isTcp; }, [](PolicyEvent& /* event */, bool newTcp) { (void) newTcp; });
+  d_lw->registerMember<const ComboAddress (PolicyEvent::*)>("remote", [](const PolicyEvent& event) -> const ComboAddress& { return event.remote; }, [](PolicyEvent& /* event */, const ComboAddress& newRemote) { (void) newRemote; });
   d_lw->registerMember("appliedPolicy", &PolicyEvent::appliedPolicy);
   d_lw->registerFunction<void(PolicyEvent::*)(const std::string&)>("addPolicyTag", [](PolicyEvent& event, const std::string& tag) { if (event.policyTags) { event.policyTags->insert(tag); } });
   d_lw->registerFunction<void(PolicyEvent::*)(const std::vector<std::pair<int, std::string> >&)>("setPolicyTags", [](PolicyEvent& event, const std::vector<std::pair<int, std::string> >& tags) {
@@ -501,7 +503,8 @@ void RecursorLua4::getFeatures(Features& features)
 static void warnDrop(const RecursorLua4::DNSQuestion& dq)
 {
   if (dq.rcode == -2) {
-    g_log << Logger::Error << "Returning -2 (pdns.DROP) is not supported anymore, see https://docs.powerdns.com/recursor/lua-scripting/hooks.html#hooksemantics" << endl;
+    SLOG(g_log << Logger::Error << "Returning -2 (pdns.DROP) is not supported anymore, see https://docs.powerdns.com/recursor/lua-scripting/hooks.html#hooksemantics" << endl,
+         g_slog->withName("lua")->info(Logr::Error, "Returning -2 (pdns.DROP) is not supported anymore, see https://docs.powerdns.com/recursor/lua-scripting/hooks.html#hooksemantics"));
     // We *could* set policy here, but that would also mean interfering with rcode and the return code of the hook.
     // So leave it at the error message.
   }
@@ -744,7 +747,8 @@ bool RecursorLua4::genhook(const luacall_t& func, DNSQuestion& dq, int& ret) con
         dq.udpAnswer = std::string(reinterpret_cast<const char*>(p.data()), p.size());
         auto cbFunc = d_lw->readVariable<boost::optional<luacall_t>>(dq.udpCallback).get_value_or(0);
         if (!cbFunc) {
-          g_log << Logger::Error << "Attempted callback for Lua UDP Query/Response which could not be found" << endl;
+          SLOG(g_log << Logger::Error << "Attempted callback for Lua UDP Query/Response which could not be found" << endl,
+               g_slog->withName("lua")->info(Logr::Error, "Attempted callback for Lua UDP Query/Response which could not be found"));
           return false;
         }
         bool result = cbFunc(&dq);
